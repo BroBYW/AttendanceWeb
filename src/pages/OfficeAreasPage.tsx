@@ -179,12 +179,12 @@ export default function OfficeAreasPage() {
         if (!deleteTarget) return;
         setSaving(true);
         try {
-            await officeAreaService.deactivate(deleteTarget.id);
-            toast.success('Office area deactivated');
+            await officeAreaService.delete(deleteTarget.id);
+            toast.success('Office area deleted');
             setDeleteTarget(null);
             loadAreas();
         } catch {
-            toast.error('Failed to deactivate office area');
+            toast.error('Failed to delete office area');
         } finally {
             setSaving(false);
         }
@@ -529,9 +529,9 @@ export default function OfficeAreasPage() {
                 open={!!deleteTarget}
                 onClose={() => setDeleteTarget(null)}
                 onConfirm={handleDelete}
-                title="Deactivate Office Area"
-                message={`Are you sure you want to deactivate "${deleteTarget?.name}"?`}
-                confirmText="Deactivate"
+                title="Delete Office Area"
+                message={`Are you sure you want to permanently delete "${deleteTarget?.name}"?`}
+                confirmText="Delete"
                 variant="danger"
                 loading={saving}
             />

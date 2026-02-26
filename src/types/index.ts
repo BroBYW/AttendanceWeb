@@ -97,7 +97,6 @@ export interface QrTokenResponse {
     id: number;
     token: string;
     expiresAt: string;
-    used: boolean;
     createdAt: string;
 }
 

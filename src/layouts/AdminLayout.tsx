@@ -12,7 +12,6 @@ import {
     X,
     Building2,
     ChevronRight,
-    QrCode,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -103,21 +102,6 @@ export default function AdminLayout() {
                         </NavLink>
                     ))}
 
-                    {/* Separator */}
-                    <hr className="my-2 border-surface-100 mx-4" />
-
-                    {/* QR Code link (opens in new tab) */}
-                    {(user?.role === 'ADMIN' || user?.role === 'QR_OPERATOR') && (
-                        <a
-                            href="/qr"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group text-surface-600 hover:bg-surface-50 hover:text-surface-900"
-                        >
-                            <QrCode size={20} className="shrink-0 text-surface-400 group-hover:text-surface-600 transition-colors" />
-                            <span className="flex-1">Launch QR Screen</span>
-                        </a>
-                    )}
                 </nav>
 
                 {/* User info + logout */}

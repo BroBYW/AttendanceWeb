@@ -27,7 +27,7 @@ export const officeAreaService = {
         return res.data;
     },
 
-    deactivate: async (id: number) => {
+    delete: async (id: number) => {
         const res = await api.delete<ApiResponse<void>>(`/api/admin/office-areas/${id}`);
         return res.data;
     },

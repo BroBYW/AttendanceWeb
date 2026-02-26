@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Users, ClipboardList, ShieldCheck, MapPin, QrCode } from 'lucide-react';
+import { Users, ClipboardList, ShieldCheck, MapPin } from 'lucide-react';
 import { userService } from '../services/userService';
 import { attendanceService } from '../services/attendanceService';
 import { officeAreaService } from '../services/officeAreaService';
@@ -21,10 +21,6 @@ export default function DashboardPage() {
     const { user } = useAuth();
 
     useEffect(() => {
-        if (user?.role === 'QR_OPERATOR') {
-            setLoading(false);
-            return;
-        }
         loadStats();
     }, [user]);
 
@@ -83,28 +79,6 @@ export default function DashboardPage() {
 
     if (loading) return <PageLoader />;
 
-    if (user?.role === 'QR_OPERATOR') {
-        return (
-            <div className="flex flex-col items-center justify-center min-h-[60vh] text-center max-w-lg mx-auto px-4">
-                <div className="w-20 h-20 bg-gradient-to-br from-primary-500 to-accent-500 rounded-3xl flex items-center justify-center shadow-xl shadow-primary-500/20 mb-8 transform -rotate-6">
-                    <QrCode className="text-white transform rotate-6" size={40} />
-                </div>
-                <h1 className="text-3xl font-bold text-surface-900 mb-3">Welcome, {user.name}</h1>
-                <p className="text-surface-600 mb-8 leading-relaxed">
-                    You are logged in as a QR Operator. As an operator, your primary duty is to display and manage the rolling QR codes for staff attendance.
-                </p>
-                <a
-                    href="/qr"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="btn-primary w-full sm:w-auto px-8 py-3 rounded-xl text-lg flex items-center justify-center gap-3 shadow-lg shadow-primary-500/30 hover:shadow-primary-500/40 transform hover:-translate-y-0.5 transition-all"
-                >
-                    <QrCode size={24} />
-                    Launch QR Screen
-                </a>
-            </div>
-        );
-    }
 
     return (
         <div>
