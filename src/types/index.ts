@@ -8,6 +8,7 @@ export interface UserResponse {
     role: Role;
     status: UserStatus;
     createdAt: string;
+    assignedOfficeAreaIds: number[];
 }
 
 export type Role = 'ADMIN' | 'QR_OPERATOR' | 'OFFICE_STAFF' | 'FIELD_STAFF';
@@ -19,6 +20,7 @@ export interface CreateUserRequest {
     password: string;
     department?: string;
     role: Role;
+    assignedOfficeAreaIds?: number[];
 }
 
 export interface UpdateUserRequest {
@@ -27,6 +29,7 @@ export interface UpdateUserRequest {
     role?: Role;
     status?: UserStatus;
     password?: string;
+    assignedOfficeAreaIds?: number[];
 }
 
 // ─── Office Area ────────────────────────────────────────────
@@ -112,6 +115,20 @@ export interface LoginResponse {
     tokenType: string;
     expiresIn: number;
     user: UserResponse;
+}
+
+// ─── GPS Logging ────────────────────────────────────────────
+export type AreaStatus = 'NORMAL' | 'OUTSTATION' | 'OUTSIDE';
+
+export interface GpsLogResponse {
+    id: number;
+    userId: number;
+    userName: string;
+    latitude: number;
+    longitude: number;
+    timestamp: string;
+    accuracy: number | null;
+    areaStatus: AreaStatus | null;
 }
 
 // ─── API Wrapper ────────────────────────────────────────────

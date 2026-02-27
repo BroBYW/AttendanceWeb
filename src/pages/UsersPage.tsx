@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Plus, Search, Edit2, UserX } from 'lucide-react';
+import { Plus, Search, Edit2, UserX, MapPin, Building } from 'lucide-react';
 import { userService } from '../services/userService';
-import type { UserResponse, CreateUserRequest, UpdateUserRequest, Role } from '../types';
+import { officeAreaService } from '../services/officeAreaService';
+import type { UserResponse, CreateUserRequest, UpdateUserRequest, Role, OfficeAreaResponse } from '../types';
 import StatusBadge from '../components/ui/StatusBadge';
 import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
+import GpsHistoryModal from '../components/ui/GpsHistoryModal';
 import { PageLoader } from '../components/ui/LoadingSpinner';
 import toast from 'react-hot-toast';
 
@@ -12,12 +14,14 @@ const ROLES: Role[] = ['ADMIN', 'QR_OPERATOR', 'OFFICE_STAFF', 'FIELD_STAFF'];
 
 export default function UsersPage() {
     const [users, setUsers] = useState<UserResponse[]>([]);
+    const [officeAreas, setOfficeAreas] = useState<OfficeAreaResponse[]>([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
     const [showModal, setShowModal] = useState(false);
     const [editUser, setEditUser] = useState<UserResponse | null>(null);
     const [deactivateTarget, setDeactivateTarget] = useState<UserResponse | null>(null);
     const [reactivateTarget, setReactivateTarget] = useState<UserResponse | null>(null);
+    const [gpsHistoryUser, setGpsHistoryUser] = useState<UserResponse | null>(null);
     const [saving, setSaving] = useState(false);
 
     // Form state
@@ -27,11 +31,46 @@ export default function UsersPage() {
         password: '',
         department: '',
         role: 'OFFICE_STAFF',
+        assignedOfficeAreaIds: [],
     });
 
     useEffect(() => {
         loadUsers();
+        loadOfficeAreas();
     }, []);
+
+    const loadOfficeAreas = async () => {
+        try {
+            const res = await officeAreaService.getAll();
+            if (res.success) setOfficeAreas(res.data);
+        } catch {
+            console.error('Failed to load office areas');
+        }
+    };
+
+    const renderAssignedAreas = (ids?: number[]) => {
+        if (!ids || ids.length === 0) return <span className="text-surface-400">—</span>;
+
+        const areas = ids
+            .map((id) => officeAreas.find((area) => area.id === id))
+            .filter((area): area is OfficeAreaResponse => Boolean(area));
+
+        if (areas.length === 0) return <span className="text-surface-400">—</span>;
+
+        return (
+            <div className="flex flex-wrap gap-2 max-w-[250px]">
+                {areas.map(area => (
+                    <span
+                        key={area.id}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-semibold bg-[#00cbf7] text-white shadow-sm"
+                    >
+                        <Building size={12} className="shrink-0" />
+                        {area.name}
+                    </span>
+                ))}
+            </div>
+        );
+    };
 
     const loadUsers = async () => {
         try {
@@ -46,7 +85,7 @@ export default function UsersPage() {
 
     const openCreate = () => {
         setEditUser(null);
-        setForm({ username: '', name: '', password: '', department: '', role: 'OFFICE_STAFF' });
+        setForm({ username: '', name: '', password: '', department: '', role: 'OFFICE_STAFF', assignedOfficeAreaIds: [] });
         setShowModal(true);
     };
 
@@ -58,6 +97,7 @@ export default function UsersPage() {
             password: '',
             department: user.department || '',
             role: user.role,
+            assignedOfficeAreaIds: user.assignedOfficeAreaIds || [],
         });
         setShowModal(true);
     };
@@ -70,6 +110,7 @@ export default function UsersPage() {
                     name: form.name,
                     department: form.department || undefined,
                     role: form.role,
+                    assignedOfficeAreaIds: form.assignedOfficeAreaIds,
                 };
                 if (form.password) payload.password = form.password;
                 await userService.update(editUser.id, payload);
@@ -168,6 +209,7 @@ export default function UsersPage() {
                             <th>Username</th>
                             <th>Department</th>
                             <th>Role</th>
+                            <th>Assigned Areas</th>
                             <th>Status</th>
                             <th className="text-right">Actions</th>
                         </tr>
@@ -187,9 +229,19 @@ export default function UsersPage() {
                                     <td>{user.username}</td>
                                     <td>{user.department || '—'}</td>
                                     <td><StatusBadge status={user.role} /></td>
+                                    <td>
+                                        {renderAssignedAreas(user.assignedOfficeAreaIds)}
+                                    </td>
                                     <td><StatusBadge status={user.status} /></td>
                                     <td>
                                         <div className="flex items-center justify-end gap-1">
+                                            <button
+                                                onClick={() => setGpsHistoryUser(user)}
+                                                className="btn-ghost btn-sm text-primary-500 hover:text-primary-600"
+                                                title="View GPS History"
+                                            >
+                                                <MapPin size={15} />
+                                            </button>
                                             <button
                                                 onClick={() => openEdit(user)}
                                                 className="btn-ghost btn-sm"
@@ -283,6 +335,33 @@ export default function UsersPage() {
                             ))}
                         </select>
                     </div>
+                    <div>
+                        <label className="label">Assigned Office Areas</label>
+                        <div className="flex flex-col gap-2 mt-1 max-h-48 overflow-y-auto p-2 border border-surface-200 rounded-md">
+                            {officeAreas.filter(a => a.status === 'ACTIVE').length === 0 ? (
+                                <span className="text-sm text-surface-400">No active office areas found.</span>
+                            ) : (
+                                officeAreas.filter(a => a.status === 'ACTIVE').map((area) => (
+                                    <label key={area.id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-surface-50 p-1 rounded">
+                                        <input
+                                            type="checkbox"
+                                            className="rounded border-surface-300 text-primary-600 focus:ring-primary-500"
+                                            checked={form.assignedOfficeAreaIds?.includes(area.id) || false}
+                                            onChange={(e) => {
+                                                const currentIds = form.assignedOfficeAreaIds || [];
+                                                if (e.target.checked) {
+                                                    setForm({ ...form, assignedOfficeAreaIds: [...currentIds, area.id] });
+                                                } else {
+                                                    setForm({ ...form, assignedOfficeAreaIds: currentIds.filter(id => id !== area.id) });
+                                                }
+                                            }}
+                                        />
+                                        {area.name}
+                                    </label>
+                                ))
+                            )}
+                        </div>
+                    </div>
                     <div className="flex gap-3 justify-end pt-4">
                         <button onClick={() => setShowModal(false)} className="btn-secondary">
                             Cancel
@@ -317,6 +396,16 @@ export default function UsersPage() {
                 variant="success"
                 loading={saving}
             />
+
+            {/* GPS History Modal */}
+            {gpsHistoryUser && (
+                <GpsHistoryModal
+                    open={!!gpsHistoryUser}
+                    onClose={() => setGpsHistoryUser(null)}
+                    userId={gpsHistoryUser.id}
+                    userName={gpsHistoryUser.name}
+                />
+            )}
         </div>
     );
 }

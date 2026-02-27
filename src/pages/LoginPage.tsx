@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { Eye, EyeOff, LogIn, Building2 } from 'lucide-react';
+import { Eye, EyeOff, LogIn } from 'lucide-react';
+import logo from '../assets/images.png';
 import toast from 'react-hot-toast';
 
 export default function LoginPage() {
@@ -51,8 +52,8 @@ export default function LoginPage() {
                 <div className="bg-white/10 backdrop-blur-2xl border border-white/20 rounded-3xl p-8 shadow-2xl">
                     {/* Logo */}
                     <div className="flex flex-col items-center mb-8">
-                        <div className="w-16 h-16 bg-gradient-to-br from-primary-400 to-accent-500 rounded-2xl flex items-center justify-center mb-4 shadow-lg shadow-primary-500/30">
-                            <Building2 className="text-white" size={32} />
+                        <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 shadow-lg shadow-primary-500/30 overflow-hidden">
+                            <img src={logo} alt="Logo" className="w-full h-full object-cover" />
                         </div>
                         <h1 className="text-2xl font-bold text-white">AttendanceWeb</h1>
                         <p className="text-white/60 text-sm mt-1">Admin Dashboard</p>

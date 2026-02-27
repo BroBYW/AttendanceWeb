@@ -10,9 +10,9 @@ import {
     LogOut,
     Menu,
     X,
-    Building2,
     ChevronRight,
 } from 'lucide-react';
+import logo from '../assets/images.png';
 import clsx from 'clsx';
 
 const navItems = [
@@ -52,8 +52,8 @@ export default function AdminLayout() {
             >
                 {/* Brand */}
                 <div className="flex items-center gap-3 px-6 h-16 border-b border-surface-100 shrink-0">
-                    <div className="w-9 h-9 bg-gradient-to-br from-primary-500 to-accent-500 rounded-xl flex items-center justify-center shadow-md shadow-primary-500/20">
-                        <Building2 className="text-white" size={20} />
+                    <div className="w-9 h-9 rounded-xl flex items-center justify-center shadow-md shadow-primary-500/20 overflow-hidden">
+                        <img src={logo} alt="Logo" className="w-full h-full object-cover" />
                     </div>
                     <div>
                         <h1 className="text-base font-bold text-surface-900 leading-tight">AttendanceWeb</h1>
