@@ -204,17 +204,7 @@ export default function OfficeAreasPage() {
             const parser = new DOMParser();
             const xmlDoc = parser.parseFromString(kmlText, "text/xml");
 
-            // 1. Try to find a Point (pin)
-            const pointCoordinates = xmlDoc.getElementsByTagName("Point");
-            if (pointCoordinates.length > 0) {
-                const coordText = pointCoordinates[0].getElementsByTagName("coordinates")[0]?.textContent;
-                if (coordText) {
-                    const [lng, lat] = coordText.trim().split(',').map(Number);
-                    if (!isNaN(lat) && !isNaN(lng)) return { latitude: lat, longitude: lng, radiusMeters: 0 };
-                }
-            }
-
-            // 2. Fallback to Polygon center
+            // 1. Prioritize finding a Polygon to compute center and radius
             const polyCoordinates = xmlDoc.getElementsByTagName("Polygon");
             if (polyCoordinates.length > 0) {
                 const coordText = polyCoordinates[0].getElementsByTagName("coordinates")[0]?.textContent;
@@ -244,6 +234,17 @@ export default function OfficeAreasPage() {
                     }
                 }
             }
+
+            // 2. Fallback to finding a Point (pin) if no valid Polygon is found
+            const pointCoordinates = xmlDoc.getElementsByTagName("Point");
+            if (pointCoordinates.length > 0) {
+                const coordText = pointCoordinates[0].getElementsByTagName("coordinates")[0]?.textContent;
+                if (coordText) {
+                    const [lng, lat] = coordText.trim().split(',').map(Number);
+                    if (!isNaN(lat) && !isNaN(lng)) return { latitude: lat, longitude: lng, radiusMeters: 0 };
+                }
+            }
+
         } catch (e) {
             console.error("Failed to parse KML for coordinates", e);
         }
