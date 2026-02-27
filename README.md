@@ -1,73 +1,87 @@
-# React + TypeScript + Vite
+# Attendance System Admin Web Portal
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A React-based admin dashboard for the Employee Attendance Tracking System. It provides administrators with a comprehensive interface to manage office areas, view employee attendance logs, and monitor geospatial tracking data.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- **Dashboard:** Overview of daily attendance, late arrivals, and absent employees.
+- **Geofence Management:** Create, view, and manage office areas using both circular and polygon (KML/GeoJSON) geofences across an interactive map.
+- **Attendance Management:** Review attendance records, including photo evidence and reasons for late arrivals or outstation check-ins.
+- **GPS History Tracking:** View historical GPS movement traces and logs of field staff directly on the map.
+- **QR Code Management:** Generate and view dynamic QR codes for secure check-ins.
+- **User Management:** Monitor employee records and their roles.
 
-## React Compiler
+## Tech Stack
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- **Framework:** React 18 with Vite
+- **Language:** TypeScript
+- **Styling:** Tailwind CSS, Headless UI
+- **Maps:** Leaflet, React-Leaflet, Leaflet Omnivore
+- **Icons:** Lucide React
+- **HTTP Client:** Axios
+- **Routing:** React Router DOM
+- **Miscellaneous:** React Hot Toast, QRCode React
 
-## Expanding the ESLint configuration
+## Getting Started
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### Prerequisites
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+- Node.js (v18 or higher recommended)
+- npm or yarn
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+### Installation
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+1. Navigate to the `AttendanceWeb` directory.
+   ```bash
+   cd AttendanceWeb
+   ```
+
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+
+3. Configure your environment variables.
+   You need to point the frontend to your Spring Boot backend instance. Create a `.env` file in the root directory (or `.env.local`) and add your backend API URL. For localized development:
+   ```env
+   VITE_API_BASE_URL=http://localhost:8080/api
+   ```
+
+4. Start the development server:
+   ```bash
+   npm run dev
+   ```
+
+### Building for Production
+
+To create an optimized production build, run:
+
+```bash
+npm run build
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+This will run TypeScript type checking and compile the application into the `dist` folder.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Project Structure
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```text
+src/
+├── assets/        # Static UI assets and images
+├── components/    # Reusable UI components (buttons, modals, layout elements)
+├── contexts/      # React contexts (e.g., AuthProvider for JWT state)
+├── hooks/         # Custom React hooks (e.g., useAuth)
+├── pages/         # Page-level components corresponding to application routes
+├── services/      # API communication layer (Axios instances, endpoint wrappers)
+├── types/         # Global TypeScript interfaces and type definitions
+└── utils/         # Helper functions (e.g., date formatting, mapping utilities)
 ```
+
+## Maintenance & Tasks
+
+- Ensure to keep Leaflet and its associated React wrapper up to date to maintain map stability.
+- The built-in Vite linting strategy restricts the usage of standard React Compiler for optimal performance out-of-the-box. Ensure you update `tsconfig.json` paths if restructuring the `/src/` folder.
+- Follow ESLint standard practices as configured to maintain cleanly typed components.
+
+## License
+
+This project is for internal use for the Attendance System Digital Transformation.
