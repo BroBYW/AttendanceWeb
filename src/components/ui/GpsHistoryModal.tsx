@@ -65,8 +65,9 @@ export default function GpsHistoryModal({ open, onClose, userId, userName }: Pro
             open={open}
             onClose={onClose}
             title={`GPS History: ${userName}`}
+            maxWidth="max-w-6xl"
         >
-            <div className="flex flex-col h-[75vh]">
+            <div className="flex flex-col h-[85vh]">
                 <div className="flex items-center justify-end gap-2 mb-4">
                     <span className="text-sm text-surface-500 font-medium mr-2">View:</span>
                     <button

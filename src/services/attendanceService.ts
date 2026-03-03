@@ -39,10 +39,10 @@ export const attendanceService = {
         return res.data;
     },
 
-    reject: async (id: number, notes?: string) => {
+    reject: async (id: number, remarks?: string) => {
         const res = await api.put<ApiResponse<AttendanceResponse>>(
             `/api/attendance/${id}/reject`,
-            notes ? { notes } : undefined,
+            remarks ? { remarks } : undefined,
         );
         return res.data;
     },

@@ -42,4 +42,16 @@ export const officeAreaService = {
         );
         return res.data;
     },
+
+    importBlocks: async (name: string, file: File) => {
+        const formData = new FormData();
+        formData.append('name', name);
+        formData.append('file', file);
+        const res = await api.post<ApiResponse<OfficeAreaResponse[]>>(
+            '/api/admin/office-areas/import-blocks',
+            formData,
+            { headers: { 'Content-Type': 'multipart/form-data' } },
+        );
+        return res.data;
+    },
 };

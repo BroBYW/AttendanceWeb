@@ -41,6 +41,7 @@ export interface OfficeAreaResponse {
     radiusMeters: number | null;
     polygonFilePath: string | null;
     polygonFileUrl: string | null;
+    geojsonData: string | null;
     status: OfficeAreaStatus;
     createdAt: string;
 }
@@ -80,11 +81,13 @@ export interface AttendanceResponse {
     clockInLng: number | null;
     clockInType: ClockInType | null;
     clockInPhotoUrl: string | null;
+    inGeofence: boolean | null;
     clockOutTime: string | null;
     clockOutLat: number | null;
     clockOutLng: number | null;
     clockOutType: ClockOutType | null;
     clockOutPhotoUrl: string | null;
+    clockOutInGeofence: boolean | null;
     workingMinutes: number | null;
     status: AttendanceStatus;
     reason: string | null;

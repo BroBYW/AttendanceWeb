@@ -64,7 +64,20 @@ export default function OfficeAreasPage() {
         });
         setPolygonCoordinates('');
 
-        if (area.polygonFileUrl) {
+        // Use stored GeoJSON to extract coordinates for editing
+        if (area.geojsonData) {
+            try {
+                const parsed = JSON.parse(area.geojsonData);
+                const coords = parsed?.features?.[0]?.geometry?.coordinates?.[0];
+                if (coords && Array.isArray(coords)) {
+                    const coordStr = coords.map((c: number[]) => `${c[0]},${c[1]}`).join(' ');
+                    setPolygonCoordinates(coordStr);
+                }
+            } catch (err) {
+                console.error('Failed to parse stored GeoJSON for editing', err);
+            }
+        } else if (area.polygonFileUrl) {
+            // Legacy fallback: fetch and parse KML file
             try {
                 const kmlUrl = area.polygonFileUrl.startsWith('http')
                     ? area.polygonFileUrl
@@ -272,16 +285,16 @@ export default function OfficeAreasPage() {
             });
 
             if (createRes.success && createRes.data) {
-                // 2. Upload the KML file to the newly created geofence
+                // 2. Upload the polygon file to the newly created geofence
                 await officeAreaService.uploadPolygon(createRes.data.id, kmlFile);
-                toast.success('KML Geofence created successfully!');
+                toast.success('Geofence created successfully!');
                 setKmlNamePrompt(false);
                 setKmlFile(null);
                 setKmlName('');
                 loadAreas();
             }
         } catch (error) {
-            toast.error('Failed to create KML Geofence');
+            toast.error('Failed to create Geofence');
             console.error(error);
         } finally {
             setSaving(false);
@@ -302,7 +315,7 @@ export default function OfficeAreasPage() {
                     className="btn w-full sm:w-auto bg-[#10b981] hover:bg-[#059669] text-white border-0 shadow-md flex items-center gap-2 px-5 py-2.5 rounded-xl font-medium transition-all"
                 >
                     <DownloadCloud size={18} className="rotate-180" />
-                    Import from KML
+                    Import Polygon File
                 </button>
             </div>
             {/* Hidden file input for Global KML Import */}
@@ -573,14 +586,16 @@ export default function OfficeAreasPage() {
                 open={!!mapTarget}
                 onClose={() => setMapTarget(null)}
                 title={`Coverage Area: ${mapTarget?.name}`}
+                maxWidth="max-w-6xl"
             >
                 {mapTarget && (
-                    <div className="h-[500px]">
+                    <div className="h-[70vh]">
                         <CoverageMap
                             latitude={mapTarget.latitude}
                             longitude={mapTarget.longitude}
                             radiusMeters={mapTarget.radiusMeters || undefined}
                             polygonFileUrl={mapTarget.polygonFileUrl}
+                            geojsonData={mapTarget.geojsonData}
                         />
                     </div>
                 )}

@@ -192,3 +192,8 @@
 .animate-pulse-ring {
   animation: pulse-ring 2s ease-in-out infinite;
 }
+
+/* Remove black focus outline on Leaflet map polygons */
+.leaflet-interactive:focus {
+  outline: none;
+}

@@ -1,16 +1,20 @@
 import { useEffect, useState } from 'react';
 import { Check, X, Eye, FileText, AlertTriangle } from 'lucide-react';
 import { attendanceService } from '../services/attendanceService';
-import type { AttendanceResponse } from '../types';
+import { officeAreaService } from '../services/officeAreaService';
+import type { AttendanceResponse, OfficeAreaResponse } from '../types';
+import type { LocationStatusType } from '../components/ui/SinglePointMapModal';
 import StatusBadge from '../components/ui/StatusBadge';
 import Pagination from '../components/ui/Pagination';
 import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
+import SinglePointMapModal from '../components/ui/SinglePointMapModal';
 import { PageLoader } from '../components/ui/LoadingSpinner';
 import toast from 'react-hot-toast';
 
 export default function ApprovalPage() {
     const [records, setRecords] = useState<AttendanceResponse[]>([]);
+    const [officeAreas, setOfficeAreas] = useState<OfficeAreaResponse[]>([]);
     const [loading, setLoading] = useState(true);
     const [page, setPage] = useState(0);
     const [totalPages, setTotalPages] = useState(0);
@@ -18,10 +22,33 @@ export default function ApprovalPage() {
     const [approveTarget, setApproveTarget] = useState<AttendanceResponse | null>(null);
     const [rejectTarget, setRejectTarget] = useState<AttendanceResponse | null>(null);
     const [processing, setProcessing] = useState(false);
+    const [rejectComment, setRejectComment] = useState('');
+    const [mapModalData, setMapModalData] = useState<{
+        lat: number;
+        lng: number;
+        title: string;
+        time: string | null;
+        status: string | null;
+        locationStatus: LocationStatusType | null;
+    } | null>(null);
 
     useEffect(() => {
         loadRecords();
+        if (officeAreas.length === 0) {
+            loadOfficeAreas();
+        }
     }, [page]);
+
+    const loadOfficeAreas = async () => {
+        try {
+            const res = await officeAreaService.getAll();
+            if (res.success) {
+                setOfficeAreas(res.data.filter(area => area.status === 'ACTIVE'));
+            }
+        } catch (error) {
+            console.error('Failed to load office areas', error);
+        }
+    };
 
     const loadRecords = async () => {
         setLoading(true);
@@ -57,9 +84,10 @@ export default function ApprovalPage() {
         if (!rejectTarget) return;
         setProcessing(true);
         try {
-            await attendanceService.reject(rejectTarget.id);
+            await attendanceService.reject(rejectTarget.id, rejectComment || undefined);
             toast.success('Attendance rejected');
             setRejectTarget(null);
+            setRejectComment('');
             loadRecords();
         } catch {
             toast.error('Failed to reject');
@@ -74,6 +102,12 @@ export default function ApprovalPage() {
     const formatTime = (dt: string | null) => {
         if (!dt) return '—';
         return new Date(dt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    };
+
+    const getClockInLocationStatus = (r: AttendanceResponse): LocationStatusType => {
+        if (r.clockInType === 'OUTSTATION') return 'Outstation';
+        if (r.inGeofence === false) return 'Outside Working Area';
+        return 'Normal';
     };
 
     if (loading && records.length === 0) return <PageLoader />;
@@ -106,7 +140,25 @@ export default function ApprovalPage() {
                                 </div>
                                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-surface-500">
                                     <span>{formatDate(r.attendanceDate)}</span>
-                                    <span>Clock-in: {formatTime(r.clockInTime)}</span>
+                                    <span className="flex items-center gap-1">
+                                        Clock-in: {formatTime(r.clockInTime)}
+                                        {r.clockInLat && r.clockInLng && (
+                                            <button
+                                                onClick={() => setMapModalData({
+                                                    lat: r.clockInLat!,
+                                                    lng: r.clockInLng!,
+                                                    title: `Clock In Location: ${r.userName}`,
+                                                    time: r.clockInTime ? new Date(r.clockInTime).toLocaleTimeString() : null,
+                                                    status: r.clockInType || 'UNKNOWN',
+                                                    locationStatus: getClockInLocationStatus(r)
+                                                })}
+                                                className="text-primary-600 hover:text-primary-800 hover:underline inline-flex items-center"
+                                                title="View Map"
+                                            >
+                                                (📍 Map)
+                                            </button>
+                                        )}
+                                    </span>
                                     {r.officeAreaName && <span>📍 {r.officeAreaName}</span>}
                                 </div>
                                 {r.reason && (
@@ -193,11 +245,15 @@ export default function ApprovalPage() {
                                         : '—'}
                                 </p>
                             </div>
-                            <div>
+                            <div className="col-span-2">
                                 <span className="text-surface-400">Selfie</span>
                                 {detailRecord.clockInPhotoUrl ? (
-                                    <a href={detailRecord.clockInPhotoUrl} target="_blank" rel="noopener noreferrer" className="text-primary-600 hover:underline">
-                                        View photo
+                                    <a href={`http://localhost:8080${detailRecord.clockInPhotoUrl}`} target="_blank" rel="noopener noreferrer">
+                                        <img
+                                            src={`http://localhost:8080${detailRecord.clockInPhotoUrl}`}
+                                            alt="Clock-in selfie"
+                                            className="mt-1 rounded-lg border border-surface-200 max-h-48 object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                                        />
                                     </a>
                                 ) : <p>—</p>}
                             </div>
@@ -210,7 +266,7 @@ export default function ApprovalPage() {
                         )}
                         {detailRecord.documentUrl && (
                             <a
-                                href={detailRecord.documentUrl}
+                                href={`http://localhost:8080${detailRecord.documentUrl}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="inline-flex items-center gap-1.5 text-primary-600 hover:underline"
@@ -244,16 +300,57 @@ export default function ApprovalPage() {
                 loading={processing}
             />
 
-            {/* Reject confirm */}
-            <ConfirmModal
+            {/* Reject modal with comment */}
+            <Modal
                 open={!!rejectTarget}
-                onClose={() => setRejectTarget(null)}
-                onConfirm={handleReject}
+                onClose={() => { setRejectTarget(null); setRejectComment(''); }}
                 title="Reject Attendance"
-                message={`Reject ${rejectTarget?.userName}'s ${rejectTarget?.clockInType?.toLowerCase()} attendance for ${rejectTarget ? formatDate(rejectTarget.attendanceDate) : ''}?`}
-                confirmText="Reject"
-                variant="danger"
-                loading={processing}
+                maxWidth="max-w-md"
+            >
+                <div className="space-y-4">
+                    <p className="text-sm text-surface-600">
+                        Reject <strong>{rejectTarget?.userName}</strong>'s {rejectTarget?.clockInType?.toLowerCase()} attendance for {rejectTarget ? formatDate(rejectTarget.attendanceDate) : ''}?
+                    </p>
+                    <div>
+                        <label className="label">Comment (optional)</label>
+                        <textarea
+                            className="input w-full"
+                            rows={3}
+                            placeholder="Reason for rejection..."
+                            value={rejectComment}
+                            onChange={(e) => setRejectComment(e.target.value)}
+                        />
+                    </div>
+                    <div className="flex gap-3 justify-end pt-2">
+                        <button
+                            onClick={() => { setRejectTarget(null); setRejectComment(''); }}
+                            className="btn-secondary"
+                            disabled={processing}
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            onClick={handleReject}
+                            className="btn-danger"
+                            disabled={processing}
+                        >
+                            {processing ? 'Processing...' : 'Reject'}
+                        </button>
+                    </div>
+                </div>
+            </Modal>
+
+            {/* Single Point Map Modal */}
+            <SinglePointMapModal
+                open={!!mapModalData}
+                onClose={() => setMapModalData(null)}
+                latitude={mapModalData?.lat || 0}
+                longitude={mapModalData?.lng || 0}
+                title={mapModalData?.title || ''}
+                time={mapModalData?.time || null}
+                status={mapModalData?.status || null}
+                locationStatus={mapModalData?.locationStatus ?? null}
+                officeAreas={officeAreas}
             />
         </div>
     );
