@@ -1,7 +1,8 @@
-import { useEffect, useState, useMemo } from 'react';
-import { Search, Eye, Filter, X, Map } from 'lucide-react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import { Search, Eye, Filter, X, Map, MessageCircle, FileText } from 'lucide-react';
 import { attendanceService, type AttendanceFilters } from '../services/attendanceService';
 import { officeAreaService } from '../services/officeAreaService';
+import { userService } from '../services/userService';
 import type { AttendanceResponse, AttendanceStatus, OfficeAreaResponse } from '../types';
 import type { LocationStatusType } from '../components/ui/SinglePointMapModal';
 import StatusBadge from '../components/ui/StatusBadge';
@@ -15,6 +16,8 @@ import toast from 'react-hot-toast';
 export default function AttendancePage() {
     const [records, setRecords] = useState<AttendanceResponse[]>([]);
     const [officeAreas, setOfficeAreas] = useState<OfficeAreaResponse[]>([]);
+    // Map of userId -> assignedOfficeAreaIds for user-aware location status
+    const [userAssignments, setUserAssignments] = useState<Record<number, number[]>>({});
     const [loading, setLoading] = useState(true);
     const [page, setPage] = useState(0);
     const [totalPages, setTotalPages] = useState(0);
@@ -42,6 +45,30 @@ export default function AttendancePage() {
             loadOfficeAreas();
         }
     }, [page]);
+
+    // Fetch user assignments whenever records change
+    useEffect(() => {
+        if (records.length === 0) return;
+        const uniqueUserIds = [...new Set(records.map(r => r.userId))];
+        const missingIds = uniqueUserIds.filter(id => !(id in userAssignments));
+        if (missingIds.length === 0) return;
+
+        const fetchUsers = async () => {
+            try {
+                const res = await userService.getAll();
+                if (res.success) {
+                    const map: Record<number, number[]> = { ...userAssignments };
+                    for (const u of res.data) {
+                        map[u.id] = u.assignedOfficeAreaIds || [];
+                    }
+                    setUserAssignments(map);
+                }
+            } catch (error) {
+                console.error('Failed to load user assignments', error);
+            }
+        };
+        fetchUsers();
+    }, [records]);
 
     const loadOfficeAreas = async () => {
         try {
@@ -115,9 +142,9 @@ export default function AttendancePage() {
         return inside;
     };
 
-    /** Extract all polygon rings from office area GeoJSON data */
-    const polygonRings = useMemo(() => {
-        const rings: number[][][] = [];
+    /** Extract polygon rings with their office area ID for user-aware checks */
+    const polygonRingsWithArea = useMemo(() => {
+        const rings: { officeAreaId: number; ring: number[][] }[] = [];
         for (const area of officeAreas) {
             if (!area.geojsonData) continue;
             try {
@@ -126,10 +153,10 @@ export default function AttendancePage() {
                 for (const feature of parsed.features) {
                     const geom = feature.geometry;
                     if (geom?.type === 'Polygon' && geom.coordinates?.[0]) {
-                        rings.push(geom.coordinates[0]);
+                        rings.push({ officeAreaId: area.id, ring: geom.coordinates[0] });
                     } else if (geom?.type === 'MultiPolygon') {
                         for (const poly of geom.coordinates) {
-                            if (poly[0]) rings.push(poly[0]);
+                            if (poly[0]) rings.push({ officeAreaId: area.id, ring: poly[0] });
                         }
                     }
                 }
@@ -138,29 +165,51 @@ export default function AttendancePage() {
         return rings;
     }, [officeAreas]);
 
-    /** Check if a point is inside any polygon */
-    const isInsideAnyPolygon = (lat: number | null, lng: number | null): boolean => {
-        if (lat == null || lng == null || polygonRings.length === 0) return false;
-        return polygonRings.some(ring => pointInPolygon(lat, lng, ring));
-    };
+    /**
+     * 3-tier location status matching backend GpsLogService.determineAreaStatus:
+     *  1. Inside an ASSIGNED area → Normal
+     *  2. Inside ANY other active area → Outstation
+     *  3. Outside all areas → Outside Working Area
+     */
+    const determineLocationStatus = useCallback(
+        (lat: number | null, lng: number | null, userId: number): LocationStatusType => {
+            if (lat == null || lng == null || polygonRingsWithArea.length === 0) return 'Outside Working Area';
 
-    /** Derive location status for clock-in using frontend polygon check */
+            const assignedIds = userAssignments[userId] || [];
+            let insideAnyArea = false;
+
+            for (const { officeAreaId, ring } of polygonRingsWithArea) {
+                if (pointInPolygon(lat, lng, ring)) {
+                    // Inside this area — is it assigned to this user?
+                    if (assignedIds.includes(officeAreaId)) {
+                        return 'Normal';
+                    }
+                    insideAnyArea = true;
+                }
+            }
+
+            return insideAnyArea ? 'Outstation' : 'Outside Working Area';
+        },
+        [polygonRingsWithArea, userAssignments]
+    );
+
+    /** Derive location status for clock-in using user-aware polygon check */
     const getClockInLocationStatus = (r: AttendanceResponse): LocationStatusType => {
-        if (r.clockInType === 'OUTSTATION') return 'Outstation';
-        // Use frontend polygon detection (more accurate than saved backend value)
-        if (polygonRings.length > 0 && r.clockInLat != null && r.clockInLng != null) {
-            return isInsideAnyPolygon(r.clockInLat, r.clockInLng) ? 'Normal' : 'Outside Working Area';
+        // If frontend polygon data is available, use 3-tier user-aware logic
+        if (polygonRingsWithArea.length > 0 && r.clockInLat != null && r.clockInLng != null) {
+            return determineLocationStatus(r.clockInLat, r.clockInLng, r.userId);
         }
         // Fallback to backend value
+        if (r.clockInType === 'OUTSTATION') return 'Outstation';
         if (r.inGeofence === false) return 'Outside Working Area';
         return 'Normal';
     };
 
-    /** Derive location status for clock-out using frontend polygon check */
+    /** Derive location status for clock-out using user-aware polygon check */
     const getClockOutLocationStatus = (r: AttendanceResponse): LocationStatusType => {
-        // Use frontend polygon detection
-        if (polygonRings.length > 0 && r.clockOutLat != null && r.clockOutLng != null) {
-            return isInsideAnyPolygon(r.clockOutLat, r.clockOutLng) ? 'Normal' : 'Outside Working Area';
+        // If frontend polygon data is available, use 3-tier user-aware logic
+        if (polygonRingsWithArea.length > 0 && r.clockOutLat != null && r.clockOutLng != null) {
+            return determineLocationStatus(r.clockOutLat, r.clockOutLng, r.userId);
         }
         // Fallback to backend value
         if (r.clockOutInGeofence === false) return 'Outside Working Area';
@@ -267,103 +316,122 @@ export default function AttendancePage() {
                             </tr>
                         ) : (
                             records.map((r) => (
-                                <tr key={r.id}>
-                                    <td className="whitespace-nowrap">{formatDate(r.attendanceDate)}</td>
-                                    <td>
-                                        <div>
-                                            <p className="font-medium text-surface-900">{r.userName}</p>
-                                            <p className="text-xs text-surface-400">{r.employeeId}</p>
-                                        </div>
-                                    </td>
-                                    <td className="font-mono text-xs">
-                                        <div className="flex items-center gap-2 flex-wrap">
-                                            <span>{formatTime(r.clockInTime)}</span>
-                                            {r.clockInType && <StatusBadge status={r.clockInType} />}
-                                        </div>
-                                        <div className="mt-1">
-                                            <span
-                                                className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${getClockInLocationStatus(r) === 'Normal'
-                                                    ? 'bg-success-100 text-success-700'
-                                                    : getClockInLocationStatus(r) === 'Outstation'
-                                                        ? 'bg-primary-100 text-primary-700'
-                                                        : 'bg-amber-100 text-amber-700'
-                                                    }`}
-                                            >
-                                                {getClockInLocationStatus(r)}
-                                            </span>
-                                        </div>
-                                        {r.clockInLat && r.clockInLng && (
+                                <React.Fragment key={r.id}>
+                                    <tr>
+                                        <td className="whitespace-nowrap">{formatDate(r.attendanceDate)}</td>
+                                        <td>
+                                            <div>
+                                                <p className="font-medium text-surface-900">{r.userName}</p>
+                                                <p className="text-xs text-surface-400">{r.employeeId}</p>
+                                            </div>
+                                        </td>
+                                        <td className="font-mono text-xs">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                <span>{formatTime(r.clockInTime)}</span>
+                                                {r.clockInType && <StatusBadge status={r.clockInType} />}
+                                            </div>
+                                            <div className="mt-1">
+                                                <span
+                                                    className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${getClockInLocationStatus(r) === 'Normal'
+                                                        ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20'
+                                                        : getClockInLocationStatus(r) === 'Outstation'
+                                                            ? 'bg-primary-100 text-primary-700'
+                                                            : 'bg-amber-100 text-amber-700'
+                                                        }`}
+                                                >
+                                                    {getClockInLocationStatus(r)}
+                                                </span>
+                                            </div>
+                                            {r.clockInLat && r.clockInLng && (
+                                                <button
+                                                    onClick={() => setMapModalData({
+                                                        lat: r.clockInLat!,
+                                                        lng: r.clockInLng!,
+                                                        title: `Clock In Location: ${r.userName}`,
+                                                        time: r.clockInTime ? new Date(r.clockInTime).toLocaleTimeString() : null,
+                                                        status: r.clockInType || 'UNKNOWN',
+                                                        locationStatus: getClockInLocationStatus(r)
+                                                    })}
+                                                    className="text-[10px] text-primary-600 hover:text-primary-800 hover:underline flex items-center mt-1"
+                                                >
+                                                    <Map size={10} className="mr-0.5" /> View Map
+                                                </button>
+                                            )}
+                                        </td>
+                                        <td className="font-mono text-xs">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                <span>{formatTime(r.clockOutTime)}</span>
+                                                {r.clockOutType && <StatusBadge status={r.clockOutType} />}
+                                            </div>
+                                            <div className="mt-1">
+                                                <span
+                                                    className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${getClockOutLocationStatus(r) === 'Normal'
+                                                        ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20'
+                                                        : getClockOutLocationStatus(r) === 'Outstation'
+                                                            ? 'bg-primary-100 text-primary-700'
+                                                            : 'bg-amber-100 text-amber-700'
+                                                        }`}
+                                                >
+                                                    {getClockOutLocationStatus(r)}
+                                                </span>
+                                            </div>
+                                            {r.clockOutLat && r.clockOutLng && (
+                                                <button
+                                                    onClick={() => setMapModalData({
+                                                        lat: r.clockOutLat!,
+                                                        lng: r.clockOutLng!,
+                                                        title: `Clock Out Location: ${r.userName}`,
+                                                        time: r.clockOutTime ? new Date(r.clockOutTime).toLocaleTimeString() : null,
+                                                        status: r.clockOutType || 'UNKNOWN',
+                                                        locationStatus: getClockOutLocationStatus(r)
+                                                    })}
+                                                    className="text-[10px] text-primary-600 hover:text-primary-800 hover:underline flex items-center mt-1"
+                                                >
+                                                    <Map size={10} className="mr-0.5" /> View Map
+                                                </button>
+                                            )}
+                                        </td>
+                                        <td>
+                                            {r.workingMinutes != null
+                                                ? `${Math.floor(r.workingMinutes / 60)}h ${r.workingMinutes % 60}m`
+                                                : '—'}
+                                        </td>
+                                        <td><StatusBadge status={r.status} /></td>
+                                        <td className="text-right flex justify-end gap-1">
                                             <button
-                                                onClick={() => setMapModalData({
-                                                    lat: r.clockInLat!,
-                                                    lng: r.clockInLng!,
-                                                    title: `Clock In Location: ${r.userName}`,
-                                                    time: r.clockInTime ? new Date(r.clockInTime).toLocaleTimeString() : null,
-                                                    status: r.clockInType || 'UNKNOWN',
-                                                    locationStatus: getClockInLocationStatus(r)
-                                                })}
-                                                className="text-[10px] text-primary-600 hover:text-primary-800 hover:underline flex items-center mt-1"
+                                                onClick={() => setGpsHistoryUser({ id: r.userId, name: r.userName })}
+                                                className="btn-ghost btn-sm text-primary-600 p-1.5 hover:bg-primary-50"
+                                                title="View GPS History"
                                             >
-                                                <Map size={10} className="mr-0.5" /> View Map
+                                                <Map size={16} />
                                             </button>
-                                        )}
-                                    </td>
-                                    <td className="font-mono text-xs">
-                                        <div className="flex items-center gap-2 flex-wrap">
-                                            <span>{formatTime(r.clockOutTime)}</span>
-                                            {r.clockOutType && <StatusBadge status={r.clockOutType} />}
-                                        </div>
-                                        <div className="mt-1">
-                                            <span
-                                                className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${getClockOutLocationStatus(r) === 'Normal'
-                                                    ? 'bg-success-100 text-success-700'
-                                                    : getClockOutLocationStatus(r) === 'Outstation'
-                                                        ? 'bg-primary-100 text-primary-700'
-                                                        : 'bg-amber-100 text-amber-700'
-                                                    }`}
-                                            >
-                                                {getClockOutLocationStatus(r)}
-                                            </span>
-                                        </div>
-                                        {r.clockOutLat && r.clockOutLng && (
                                             <button
-                                                onClick={() => setMapModalData({
-                                                    lat: r.clockOutLat!,
-                                                    lng: r.clockOutLng!,
-                                                    title: `Clock Out Location: ${r.userName}`,
-                                                    time: r.clockOutTime ? new Date(r.clockOutTime).toLocaleTimeString() : null,
-                                                    status: r.clockOutType || 'UNKNOWN',
-                                                    locationStatus: getClockOutLocationStatus(r)
-                                                })}
-                                                className="text-[10px] text-primary-600 hover:text-primary-800 hover:underline flex items-center mt-1"
+                                                onClick={() => setDetailRecord(r)}
+                                                className="btn-ghost btn-sm p-1.5"
+                                                title="View Details"
                                             >
-                                                <Map size={10} className="mr-0.5" /> View Map
+                                                <Eye size={16} />
                                             </button>
-                                        )}
-                                    </td>
-                                    <td>
-                                        {r.workingMinutes != null
-                                            ? `${Math.floor(r.workingMinutes / 60)}h ${r.workingMinutes % 60}m`
-                                            : '—'}
-                                    </td>
-                                    <td><StatusBadge status={r.status} /></td>
-                                    <td className="text-right flex justify-end gap-1">
-                                        <button
-                                            onClick={() => setGpsHistoryUser({ id: r.userId, name: r.userName })}
-                                            className="btn-ghost btn-sm text-primary-600 p-1.5 hover:bg-primary-50"
-                                            title="View GPS History"
-                                        >
-                                            <Map size={16} />
-                                        </button>
-                                        <button
-                                            onClick={() => setDetailRecord(r)}
-                                            className="btn-ghost btn-sm p-1.5"
-                                            title="View Details"
-                                        >
-                                            <Eye size={16} />
-                                        </button>
-                                    </td>
-                                </tr>
+                                        </td>
+                                    </tr>
+                                    {/* Rejection note inline row */}
+                                    {r.status === 'REJECTED' && r.notes && (
+                                        <tr className="bg-red-50 border-none">
+                                            <td colSpan={7} className="py-2 px-4">
+                                                <div className="flex items-start gap-2 text-xs">
+                                                    <MessageCircle size={13} className="text-red-400 mt-0.5 shrink-0" />
+                                                    <div>
+                                                        <span className="font-medium text-red-600">Rejection Note: </span>
+                                                        <span className="text-red-700">{r.notes}</span>
+                                                        {r.reviewedByName && (
+                                                            <span className="text-red-400 ml-2">— {r.reviewedByName}</span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    )}
+                                </React.Fragment>
                             ))
                         )}
                     </tbody>
@@ -527,17 +595,30 @@ export default function AttendancePage() {
                                     )}
                                     {detailRecord.documentUrl && (
                                         <div>
-                                            <span className="text-surface-400">Document</span>
-                                            <p>
+                                            <span className="text-surface-400">Attachment</span>
+                                            <div className="mt-1">
+                                                <img
+                                                    src={`http://localhost:8080${detailRecord.documentUrl}`}
+                                                    alt="Attached document"
+                                                    className="rounded-lg max-h-48 object-contain border border-surface-200"
+                                                    onError={(e) => {
+                                                        const el = e.currentTarget;
+                                                        el.style.display = 'none';
+                                                        const link = el.nextElementSibling as HTMLElement;
+                                                        if (link) link.style.display = 'inline-flex';
+                                                    }}
+                                                />
                                                 <a
-                                                    href={detailRecord.documentUrl}
+                                                    href={`http://localhost:8080${detailRecord.documentUrl}`}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
-                                                    className="text-primary-600 hover:underline"
+                                                    className="text-primary-600 hover:underline items-center gap-1"
+                                                    style={{ display: 'none' }}
                                                 >
+                                                    <FileText size={14} className="inline mr-1" />
                                                     View document
                                                 </a>
-                                            </p>
+                                            </div>
                                         </div>
                                     )}
                                 </div>
@@ -554,9 +635,19 @@ export default function AttendancePage() {
                                     {detailRecord.reviewedAt && (
                                         <p className="text-xs text-surface-400">{new Date(detailRecord.reviewedAt).toLocaleString()}</p>
                                     )}
-                                    {detailRecord.notes && (
-                                        <p className="text-surface-600 mt-1">{detailRecord.notes}</p>
-                                    )}
+                                </div>
+                            </>
+                        )}
+                        {/* Rejection Note (prominent) */}
+                        {detailRecord.status === 'REJECTED' && detailRecord.notes && (
+                            <>
+                                <hr className="border-surface-100" />
+                                <div className="bg-red-50 border border-red-200 p-3 rounded-lg">
+                                    <div className="flex items-center gap-1.5 mb-1">
+                                        <MessageCircle size={14} className="text-red-500" />
+                                        <span className="text-red-700 font-semibold text-xs">Rejection Note</span>
+                                    </div>
+                                    <p className="text-red-700 text-sm">{detailRecord.notes}</p>
                                 </div>
                             </>
                         )}

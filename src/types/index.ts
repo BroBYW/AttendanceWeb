@@ -66,7 +66,7 @@ export interface UpdateOfficeAreaRequest {
 // ─── Attendance ─────────────────────────────────────────────
 export type ClockInType = 'NORMAL' | 'LATE' | 'OUTSTATION' | 'ABSENT';
 export type ClockOutType = 'NORMAL' | 'EARLY';
-export type AttendanceStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+export type AttendanceStatus = 'PENDING' | 'AUTO_APPROVED' | 'APPROVED' | 'REJECTED';
 
 export interface AttendanceResponse {
     id: number;

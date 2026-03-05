@@ -27,7 +27,10 @@ interface StatusBadgeProps {
 
 export default function StatusBadge({ status, className }: StatusBadgeProps) {
     const badgeClass = statusConfig[status] || 'badge-neutral';
-    const display = status.replace(/_/g, ' ');
+
+    let display = status.replace(/_/g, ' ');
+    if (status === 'LATE') display = 'Late Clock-In';
+    if (status === 'EARLY') display = 'Early Clock-Out';
 
     return (
         <span className={clsx(badgeClass, className)}>{display}</span>

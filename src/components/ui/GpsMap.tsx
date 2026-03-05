@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, Circle, useMap, Polygon, GeoJSON } from 'react-leaflet';
 import type { GpsLogResponse, OfficeAreaResponse } from '../../types';
 import L from 'leaflet';
@@ -60,11 +60,16 @@ function pointInPolygon(lat: number, lng: number, ring: number[][]): boolean {
  */
 function findContainingBlock(
     lat: number, lng: number,
-    polygonRings: { blockno: number; taskno: number; ring: number[][] }[]
+    polygonRings: { estate: string; division: number; blockno: number; taskno: number; ring: number[][] }[]
 ): string | null {
     for (const p of polygonRings) {
         if (pointInPolygon(lat, lng, p.ring)) {
-            return `Block ${p.blockno}, Task ${p.taskno}`;
+            const parts: string[] = [];
+            if (p.estate) parts.push(p.estate);
+            if (p.division) parts.push(`D${p.division}`);
+            if (p.blockno) parts.push(`B${p.blockno}`);
+            if (p.taskno) parts.push(`T${p.taskno}`);
+            return parts.join(' · ') || 'Unknown';
         }
     }
     return null;
@@ -86,11 +91,15 @@ function MapResizer() {
 interface Props {
     logs: GpsLogResponse[];
     officeAreas: OfficeAreaResponse[];
+    selectedLogId?: number | null;
 }
 
-export default function GpsMap({ logs, officeAreas }: Props) {
+export default function GpsMap({ logs, officeAreas, selectedLogId }: Props) {
     // If no logs, fallback to a default view (e.g. standard coords)
     const defaultCenter: [number, number] = [2.340590, 111.845049];
+
+    // Ref to store Marker instances for opening popups
+    const markerRefs = useRef<{ [id: number]: L.Marker | null }>({});
 
     // Sort logs chronologically to draw the path correctly
     const sortedLogs = [...logs].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
@@ -127,6 +136,22 @@ export default function GpsMap({ logs, officeAreas }: Props) {
         }
     }, [traceByDay.length]);
 
+    // Ensure the day of the selected log is visible
+    useEffect(() => {
+        if (selectedLogId) {
+            const log = logs.find(l => l.id === selectedLogId);
+            if (log) {
+                const dateKey = new Date(log.timestamp).toLocaleDateString('en-CA');
+                setSelectedDays(prev => {
+                    if (!prev.has(dateKey)) {
+                        return new Set([...prev, dateKey]);
+                    }
+                    return prev;
+                });
+            }
+        }
+    }, [selectedLogId, logs]);
+
     const toggleDay = (date: string) => {
         setSelectedDays(prev => {
             const next = new Set(prev);
@@ -162,7 +187,7 @@ export default function GpsMap({ logs, officeAreas }: Props) {
     // Parse GeoJSON data from office areas
     const { geojsonLayers, polygonRings } = useMemo(() => {
         const layers: { id: number; name: string; data: GeoJSON.FeatureCollection }[] = [];
-        const rings: { blockno: number; taskno: number; ring: number[][] }[] = [];
+        const rings: { estate: string; division: number; blockno: number; taskno: number; ring: number[][] }[] = [];
 
         for (const area of officeAreas) {
             if (area.geojsonData) {
@@ -174,14 +199,16 @@ export default function GpsMap({ logs, officeAreas }: Props) {
                     if (parsed.features) {
                         for (const feature of parsed.features) {
                             const props = feature.properties || {};
+                            const estate = props.Estate || '';
+                            const division = props.Division || 0;
                             const blockno = props.Blockno || 0;
                             const taskno = props.TaskNo ?? props.Taskno ?? 0;
                             const geom = feature.geometry;
                             if (geom.type === 'Polygon') {
-                                rings.push({ blockno, taskno, ring: geom.coordinates[0] as number[][] });
+                                rings.push({ estate, division, blockno, taskno, ring: geom.coordinates[0] as number[][] });
                             } else if (geom.type === 'MultiPolygon') {
                                 for (const poly of geom.coordinates) {
-                                    rings.push({ blockno, taskno, ring: poly[0] as number[][] });
+                                    rings.push({ estate, division, blockno, taskno, ring: poly[0] as number[][] });
                                 }
                             }
                         }
@@ -290,6 +317,28 @@ export default function GpsMap({ logs, officeAreas }: Props) {
     };
     const [drawerOpen, setDrawerOpen] = useState(false);
 
+    // Component to control map panning and opening popups
+    function MapController({ selectedId }: { selectedId?: number | null }) {
+        const map = useMap();
+        useEffect(() => {
+            if (selectedId) {
+                const log = logs.find(l => l.id === selectedId);
+                if (log) {
+                    map.flyTo([log.latitude, log.longitude], 18, { duration: 0.5 });
+
+                    // Open popup after a short delay to allow flyTo to start
+                    setTimeout(() => {
+                        const marker = markerRefs.current[selectedId];
+                        if (marker) {
+                            marker.openPopup();
+                        }
+                    }, 500);
+                }
+            }
+        }, [selectedId, map]);
+        return null;
+    }
+
     return (
         <div className="relative h-full w-full">
             {/* Map fills the entire area */}
@@ -301,6 +350,7 @@ export default function GpsMap({ logs, officeAreas }: Props) {
                 scrollWheelZoom={true}
             >
                 <MapResizer />
+                <MapController selectedId={selectedLogId} />
                 <TileLayer
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -467,13 +517,18 @@ export default function GpsMap({ logs, officeAreas }: Props) {
                             return { color, weight: 2.5, opacity: 0.9, fillColor: color, fillOpacity: 0.15 };
                         }}
                         onEachFeature={(feature, featureLayer) => {
-                            if (feature.properties?.Blockno) {
+                            if (feature.properties) {
                                 const props = feature.properties;
                                 const taskNo = props.TaskNo ?? props.Taskno;
-                                const label = `Block ${props.Blockno}` +
-                                    (taskNo ? ` · Task ${taskNo}` : '') +
-                                    (props.AreaHa ? ` · ${props.AreaHa} ha` : '');
-                                featureLayer.bindTooltip(label, { sticky: true });
+                                const parts: string[] = [];
+                                if (props.Estate) parts.push(`Estate: ${props.Estate}`);
+                                if (props.Division != null) parts.push(`Div ${props.Division}`);
+                                if (props.Blockno) parts.push(`Block ${props.Blockno}`);
+                                if (taskNo) parts.push(`Task ${taskNo}`);
+                                if (props.AreaHa) parts.push(`${props.AreaHa} ha`);
+                                if (parts.length > 0) {
+                                    featureLayer.bindTooltip(parts.join(' · '), { sticky: true });
+                                }
                             }
                         }}
                     />
@@ -507,6 +562,7 @@ export default function GpsMap({ logs, officeAreas }: Props) {
                             key={log.id}
                             position={[log.latitude, log.longitude]}
                             icon={getIconForStatus(log.areaStatus)}
+                            ref={(el) => { markerRefs.current[log.id] = el; }}
                         >
                             <Popup>
                                 <div className="text-xs">

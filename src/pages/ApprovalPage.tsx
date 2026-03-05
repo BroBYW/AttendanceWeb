@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
-import { Check, X, Eye, FileText, AlertTriangle } from 'lucide-react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
+import { Check, X, Eye, FileText, AlertTriangle, Map } from 'lucide-react';
 import { attendanceService } from '../services/attendanceService';
 import { officeAreaService } from '../services/officeAreaService';
+import { userService } from '../services/userService';
 import type { AttendanceResponse, OfficeAreaResponse } from '../types';
 import type { LocationStatusType } from '../components/ui/SinglePointMapModal';
 import StatusBadge from '../components/ui/StatusBadge';
@@ -9,20 +10,25 @@ import Pagination from '../components/ui/Pagination';
 import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import SinglePointMapModal from '../components/ui/SinglePointMapModal';
+import GpsHistoryModal from '../components/ui/GpsHistoryModal';
 import { PageLoader } from '../components/ui/LoadingSpinner';
 import toast from 'react-hot-toast';
 
 export default function ApprovalPage() {
     const [records, setRecords] = useState<AttendanceResponse[]>([]);
     const [officeAreas, setOfficeAreas] = useState<OfficeAreaResponse[]>([]);
+    // Map of userId -> assignedOfficeAreaIds for user-aware location status
+    const [userAssignments, setUserAssignments] = useState<Record<number, number[]>>({});
     const [loading, setLoading] = useState(true);
     const [page, setPage] = useState(0);
     const [totalPages, setTotalPages] = useState(0);
+    const [statusFilter, setStatusFilter] = useState<string>('PENDING');
     const [detailRecord, setDetailRecord] = useState<AttendanceResponse | null>(null);
     const [approveTarget, setApproveTarget] = useState<AttendanceResponse | null>(null);
     const [rejectTarget, setRejectTarget] = useState<AttendanceResponse | null>(null);
     const [processing, setProcessing] = useState(false);
     const [rejectComment, setRejectComment] = useState('');
+    const [gpsHistoryUser, setGpsHistoryUser] = useState<{ id: number; name: string } | null>(null);
     const [mapModalData, setMapModalData] = useState<{
         lat: number;
         lng: number;
@@ -37,7 +43,31 @@ export default function ApprovalPage() {
         if (officeAreas.length === 0) {
             loadOfficeAreas();
         }
-    }, [page]);
+    }, [page, statusFilter]);
+
+    // Fetch user assignments whenever records change
+    useEffect(() => {
+        if (records.length === 0) return;
+        const uniqueUserIds = [...new Set(records.map(r => r.userId))];
+        const missingIds = uniqueUserIds.filter(id => !(id in userAssignments));
+        if (missingIds.length === 0) return;
+
+        const fetchUsers = async () => {
+            try {
+                const res = await userService.getAll();
+                if (res.success) {
+                    const map: Record<number, number[]> = { ...userAssignments };
+                    for (const u of res.data) {
+                        map[u.id] = u.assignedOfficeAreaIds || [];
+                    }
+                    setUserAssignments(map);
+                }
+            } catch (error) {
+                console.error('Failed to load user assignments', error);
+            }
+        };
+        fetchUsers();
+    }, [records]);
 
     const loadOfficeAreas = async () => {
         try {
@@ -53,17 +83,27 @@ export default function ApprovalPage() {
     const loadRecords = async () => {
         setLoading(true);
         try {
-            const res = await attendanceService.getAll({ status: 'PENDING', page, size: 20 });
+            const filters: any = { page, size: 20 };
+            if (statusFilter !== 'ALL') filters.status = statusFilter;
+            const res = await attendanceService.getAll(filters);
             if (res.success) {
                 setRecords(res.data.content);
                 setTotalPages(res.data.totalPages);
             }
         } catch {
-            toast.error('Failed to load pending records');
+            toast.error('Failed to load records');
         } finally {
             setLoading(false);
         }
     };
+
+    const statusTabs = [
+        { value: 'PENDING', label: 'Pending' },
+        { value: 'AUTO_APPROVED', label: 'Auto-Approved' },
+        { value: 'APPROVED', label: 'Approved' },
+        { value: 'REJECTED', label: 'Rejected' },
+        { value: 'ALL', label: 'All' },
+    ];
 
     const handleApprove = async () => {
         if (!approveTarget) return;
@@ -104,9 +144,85 @@ export default function ApprovalPage() {
         return new Date(dt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
     };
 
+    /** Ray-casting point-in-polygon test. ring is [lng, lat] pairs (GeoJSON order). */
+    const pointInPolygon = (lat: number, lng: number, ring: number[][]): boolean => {
+        let inside = false;
+        for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+            const xi = ring[i][1], yi = ring[i][0];
+            const xj = ring[j][1], yj = ring[j][0];
+            const intersect = ((yi > lng) !== (yj > lng)) &&
+                (lat < (xj - xi) * (lng - yi) / (yj - yi) + xi);
+            if (intersect) inside = !inside;
+        }
+        return inside;
+    };
+
+    /** Extract polygon rings with their office area ID for user-aware checks */
+    const polygonRingsWithArea = useMemo(() => {
+        const rings: { officeAreaId: number; ring: number[][] }[] = [];
+        for (const area of officeAreas) {
+            if (!area.geojsonData) continue;
+            try {
+                const parsed = JSON.parse(area.geojsonData);
+                if (!parsed.features) continue;
+                for (const feature of parsed.features) {
+                    const geom = feature.geometry;
+                    if (geom?.type === 'Polygon' && geom.coordinates?.[0]) {
+                        rings.push({ officeAreaId: area.id, ring: geom.coordinates[0] });
+                    } else if (geom?.type === 'MultiPolygon') {
+                        for (const poly of geom.coordinates) {
+                            if (poly[0]) rings.push({ officeAreaId: area.id, ring: poly[0] });
+                        }
+                    }
+                }
+            } catch { /* ignore parse errors */ }
+        }
+        return rings;
+    }, [officeAreas]);
+
+    /**
+     * 3-tier location status matching backend GpsLogService.determineAreaStatus:
+     *  1. Inside an ASSIGNED area → Normal
+     *  2. Inside ANY other active area → Outstation
+     *  3. Outside all areas → Outside Working Area
+     */
+    const determineLocationStatus = useCallback(
+        (lat: number | null, lng: number | null, userId: number): LocationStatusType => {
+            if (lat == null || lng == null || polygonRingsWithArea.length === 0) return 'Outside Working Area';
+
+            const assignedIds = userAssignments[userId] || [];
+            let insideAnyArea = false;
+
+            for (const { officeAreaId, ring } of polygonRingsWithArea) {
+                if (pointInPolygon(lat, lng, ring)) {
+                    if (assignedIds.includes(officeAreaId)) {
+                        return 'Normal';
+                    }
+                    insideAnyArea = true;
+                }
+            }
+
+            return insideAnyArea ? 'Outstation' : 'Outside Working Area';
+        },
+        [polygonRingsWithArea, userAssignments]
+    );
+
+    /** Derive location status for clock-in using user-aware polygon check */
     const getClockInLocationStatus = (r: AttendanceResponse): LocationStatusType => {
+        if (polygonRingsWithArea.length > 0 && r.clockInLat != null && r.clockInLng != null) {
+            return determineLocationStatus(r.clockInLat, r.clockInLng, r.userId);
+        }
         if (r.clockInType === 'OUTSTATION') return 'Outstation';
         if (r.inGeofence === false) return 'Outside Working Area';
+        return 'Normal';
+    };
+
+    /** Derive location status for clock-out using user-aware polygon check */
+    const getClockOutLocationStatus = (r: AttendanceResponse): LocationStatusType => {
+        if (polygonRingsWithArea.length > 0 && r.clockOutLat != null && r.clockOutLng != null) {
+            return determineLocationStatus(r.clockOutLat, r.clockOutLng, r.userId);
+        }
+        if (r.clockOutInGeofence === false) return 'Outside Working Area';
         return 'Normal';
     };
 
@@ -115,10 +231,26 @@ export default function ApprovalPage() {
     return (
         <div>
             <div className="mb-6">
-                <h1 className="text-2xl font-bold text-surface-900">Pending Approvals</h1>
+                <h1 className="text-2xl font-bold text-surface-900">Approvals</h1>
                 <p className="text-sm text-surface-500 mt-1">
-                    Review late & outstation attendance requests
+                    Review & manage attendance requests
                 </p>
+            </div>
+
+            {/* Status filter tabs */}
+            <div className="flex flex-wrap gap-2 mb-4">
+                {statusTabs.map(tab => (
+                    <button
+                        key={tab.value}
+                        onClick={() => { setStatusFilter(tab.value); setPage(0); }}
+                        className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${statusFilter === tab.value
+                            ? 'bg-primary-600 text-white shadow-sm'
+                            : 'bg-surface-100 text-surface-600 hover:bg-surface-200'
+                            }`}
+                    >
+                        {tab.label}
+                    </button>
+                ))}
             </div>
 
             {records.length === 0 && !loading ? (
@@ -133,15 +265,28 @@ export default function ApprovalPage() {
                         <div key={r.id} className="card p-5 flex flex-col sm:flex-row sm:items-center gap-4">
                             {/* Info */}
                             <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 mb-1">
+                                <div className="flex items-center gap-2 mb-1 flex-wrap">
                                     <p className="font-semibold text-surface-900">{r.userName}</p>
                                     <span className="text-xs text-surface-400">({r.employeeId})</span>
                                     {r.clockInType && <StatusBadge status={r.clockInType} />}
+                                    {r.clockOutType && <StatusBadge status={r.clockOutType} />}
+                                    <StatusBadge status={r.status} />
                                 </div>
                                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-surface-500">
                                     <span>{formatDate(r.attendanceDate)}</span>
+                                    {/* Clock In */}
                                     <span className="flex items-center gap-1">
                                         Clock-in: {formatTime(r.clockInTime)}
+                                        <span
+                                            className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${getClockInLocationStatus(r) === 'Normal'
+                                                ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20'
+                                                : getClockInLocationStatus(r) === 'Outstation'
+                                                    ? 'bg-primary-100 text-primary-700'
+                                                    : 'bg-amber-100 text-amber-700'
+                                                }`}
+                                        >
+                                            {getClockInLocationStatus(r)}
+                                        </span>
                                         {r.clockInLat && r.clockInLng && (
                                             <button
                                                 onClick={() => setMapModalData({
@@ -159,7 +304,46 @@ export default function ApprovalPage() {
                                             </button>
                                         )}
                                     </span>
-                                    {r.officeAreaName && <span>📍 {r.officeAreaName}</span>}
+                                    {/* Clock Out */}
+                                    <span className="flex items-center gap-1">
+                                        Clock-out: {formatTime(r.clockOutTime)}
+                                        {r.clockOutTime && (
+                                            <span
+                                                className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${getClockOutLocationStatus(r) === 'Normal'
+                                                    ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20'
+                                                    : getClockOutLocationStatus(r) === 'Outstation'
+                                                        ? 'bg-primary-100 text-primary-700'
+                                                        : 'bg-amber-100 text-amber-700'
+                                                    }`}
+                                            >
+                                                {getClockOutLocationStatus(r)}
+                                            </span>
+                                        )}
+                                        {r.clockOutLat && r.clockOutLng && (
+                                            <button
+                                                onClick={() => setMapModalData({
+                                                    lat: r.clockOutLat!,
+                                                    lng: r.clockOutLng!,
+                                                    title: `Clock Out Location: ${r.userName}`,
+                                                    time: r.clockOutTime ? new Date(r.clockOutTime).toLocaleTimeString() : null,
+                                                    status: r.clockOutType || 'UNKNOWN',
+                                                    locationStatus: getClockOutLocationStatus(r)
+                                                })}
+                                                className="text-primary-600 hover:text-primary-800 hover:underline inline-flex items-center"
+                                                title="View Map"
+                                            >
+                                                (📍 Map)
+                                            </button>
+                                        )}
+                                    </span>
+                                    {r.officeAreaName && (
+                                        <span className="flex items-center gap-1.5">
+                                            <span className="text-surface-500 text-xs">Working area:</span>
+                                            <span className="inline-block px-2 py-0.5 rounded text-[11px] font-medium bg-blue-100 text-blue-700 border border-blue-200">
+                                                {r.officeAreaName}
+                                            </span>
+                                        </span>
+                                    )}
                                 </div>
                                 {r.reason && (
                                     <div className="mt-2 flex items-start gap-2 text-sm">
@@ -169,7 +353,7 @@ export default function ApprovalPage() {
                                 )}
                                 {r.documentUrl && (
                                     <a
-                                        href={r.documentUrl}
+                                        href={`http://localhost:8080${r.documentUrl}`}
                                         target="_blank"
                                         rel="noopener noreferrer"
                                         className="inline-flex items-center gap-1 mt-1 text-xs text-primary-600 hover:underline"
@@ -183,26 +367,33 @@ export default function ApprovalPage() {
                             {/* Actions */}
                             <div className="flex items-center gap-2 shrink-0">
                                 <button
+                                    onClick={() => setGpsHistoryUser({ id: r.userId, name: r.userName })}
+                                    className="btn-ghost btn-sm text-primary-600 p-1.5 hover:bg-primary-50"
+                                    title="View GPS History"
+                                >
+                                    <Map size={16} />
+                                </button>
+                                <button
                                     onClick={() => setDetailRecord(r)}
                                     className="btn-ghost btn-sm"
                                     title="View details"
                                 >
                                     <Eye size={16} />
                                 </button>
-                                <button
+                                {r.status === 'PENDING' && <button
                                     onClick={() => setApproveTarget(r)}
                                     className="btn-success btn-sm"
                                 >
                                     <Check size={16} />
                                     Approve
-                                </button>
-                                <button
+                                </button>}
+                                {r.status === 'PENDING' && <button
                                     onClick={() => setRejectTarget(r)}
                                     className="btn-danger btn-sm"
                                 >
                                     <X size={16} />
                                     Reject
-                                </button>
+                                </button>}
                             </div>
                         </div>
                     ))}
@@ -220,6 +411,7 @@ export default function ApprovalPage() {
             >
                 {detailRecord && (
                     <div className="space-y-4 text-sm">
+                        {/* Employee & Date */}
                         <div className="grid grid-cols-2 gap-4">
                             <div>
                                 <span className="text-surface-400">Employee</span>
@@ -229,35 +421,119 @@ export default function ApprovalPage() {
                                 <span className="text-surface-400">Date</span>
                                 <p>{formatDate(detailRecord.attendanceDate)}</p>
                             </div>
-                            <div>
-                                <span className="text-surface-400">Clock In</span>
-                                <p>{formatTime(detailRecord.clockInTime)}</p>
-                            </div>
-                            <div>
-                                <span className="text-surface-400">Type</span>
-                                <div>{detailRecord.clockInType ? <StatusBadge status={detailRecord.clockInType} /> : '—'}</div>
-                            </div>
-                            <div>
-                                <span className="text-surface-400">GPS (In)</span>
-                                <p className="font-mono text-xs">
-                                    {detailRecord.clockInLat != null
-                                        ? `${detailRecord.clockInLat}, ${detailRecord.clockInLng}`
-                                        : '—'}
-                                </p>
-                            </div>
-                            <div className="col-span-2">
-                                <span className="text-surface-400">Selfie</span>
-                                {detailRecord.clockInPhotoUrl ? (
-                                    <a href={`http://localhost:8080${detailRecord.clockInPhotoUrl}`} target="_blank" rel="noopener noreferrer">
-                                        <img
-                                            src={`http://localhost:8080${detailRecord.clockInPhotoUrl}`}
-                                            alt="Clock-in selfie"
-                                            className="mt-1 rounded-lg border border-surface-200 max-h-48 object-cover cursor-pointer hover:opacity-80 transition-opacity"
-                                        />
-                                    </a>
-                                ) : <p>—</p>}
+                        </div>
+
+                        {/* Clock In Section */}
+                        <div className="border-t border-surface-100 pt-4">
+                            <h4 className="font-semibold text-surface-700 mb-3">Clock In</h4>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <span className="text-surface-400">Time</span>
+                                    <p>{formatTime(detailRecord.clockInTime)}</p>
+                                </div>
+                                <div>
+                                    <span className="text-surface-400">Type</span>
+                                    <div>{detailRecord.clockInType ? <StatusBadge status={detailRecord.clockInType} /> : '—'}</div>
+                                </div>
+                                <div>
+                                    <span className="text-surface-400">Location Status</span>
+                                    <div className="mt-1">
+                                        <span
+                                            className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${getClockInLocationStatus(detailRecord) === 'Normal'
+                                                ? 'bg-success-100 text-success-700'
+                                                : getClockInLocationStatus(detailRecord) === 'Outstation'
+                                                    ? 'bg-primary-100 text-primary-700'
+                                                    : 'bg-amber-100 text-amber-700'
+                                                }`}
+                                        >
+                                            {getClockInLocationStatus(detailRecord)}
+                                        </span>
+                                    </div>
+                                </div>
+                                <div>
+                                    <span className="text-surface-400">GPS</span>
+                                    <p className="font-mono text-xs">
+                                        {detailRecord.clockInLat != null
+                                            ? `${detailRecord.clockInLat}, ${detailRecord.clockInLng}`
+                                            : '—'}
+                                    </p>
+                                </div>
+                                {detailRecord.clockInPhotoUrl && (
+                                    <div className="col-span-2">
+                                        <span className="text-surface-400">Selfie</span>
+                                        <a href={`http://localhost:8080${detailRecord.clockInPhotoUrl}`} target="_blank" rel="noopener noreferrer">
+                                            <img
+                                                src={`http://localhost:8080${detailRecord.clockInPhotoUrl}`}
+                                                alt="Clock-in selfie"
+                                                className="mt-1 rounded-lg border border-surface-200 max-h-48 object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                                            />
+                                        </a>
+                                    </div>
+                                )}
                             </div>
                         </div>
+
+                        {/* Clock Out Section */}
+                        <div className="border-t border-surface-100 pt-4">
+                            <h4 className="font-semibold text-surface-700 mb-3">Clock Out</h4>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <span className="text-surface-400">Time</span>
+                                    <p>{formatTime(detailRecord.clockOutTime)}</p>
+                                </div>
+                                <div>
+                                    <span className="text-surface-400">Type</span>
+                                    <div>{detailRecord.clockOutType ? <StatusBadge status={detailRecord.clockOutType} /> : '—'}</div>
+                                </div>
+                                {detailRecord.clockOutTime && (
+                                    <div>
+                                        <span className="text-surface-400">Location Status</span>
+                                        <div className="mt-1">
+                                            <span
+                                                className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${getClockOutLocationStatus(detailRecord) === 'Normal'
+                                                    ? 'bg-success-100 text-success-700'
+                                                    : getClockOutLocationStatus(detailRecord) === 'Outstation'
+                                                        ? 'bg-primary-100 text-primary-700'
+                                                        : 'bg-amber-100 text-amber-700'
+                                                    }`}
+                                            >
+                                                {getClockOutLocationStatus(detailRecord)}
+                                            </span>
+                                        </div>
+                                    </div>
+                                )}
+                                <div>
+                                    <span className="text-surface-400">GPS</span>
+                                    <p className="font-mono text-xs">
+                                        {detailRecord.clockOutLat != null
+                                            ? `${detailRecord.clockOutLat}, ${detailRecord.clockOutLng}`
+                                            : '—'}
+                                    </p>
+                                </div>
+                                {detailRecord.clockOutPhotoUrl && (
+                                    <div className="col-span-2">
+                                        <span className="text-surface-400">Selfie</span>
+                                        <a href={`http://localhost:8080${detailRecord.clockOutPhotoUrl}`} target="_blank" rel="noopener noreferrer">
+                                            <img
+                                                src={`http://localhost:8080${detailRecord.clockOutPhotoUrl}`}
+                                                alt="Clock-out selfie"
+                                                className="mt-1 rounded-lg border border-surface-200 max-h-48 object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                                            />
+                                        </a>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Working Duration */}
+                        {detailRecord.workingMinutes != null && (
+                            <div className="border-t border-surface-100 pt-4">
+                                <span className="text-surface-400">Working Duration</span>
+                                <p className="font-medium">{Math.floor(detailRecord.workingMinutes / 60)}h {detailRecord.workingMinutes % 60}m</p>
+                            </div>
+                        )}
+
+                        {/* Reason */}
                         {detailRecord.reason && (
                             <div className="bg-amber-50 p-3 rounded-lg">
                                 <span className="text-amber-700 font-medium text-xs">Reason</span>
@@ -265,25 +541,44 @@ export default function ApprovalPage() {
                             </div>
                         )}
                         {detailRecord.documentUrl && (
-                            <a
-                                href={`http://localhost:8080${detailRecord.documentUrl}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1.5 text-primary-600 hover:underline"
-                            >
-                                <FileText size={14} />
-                                View attached document
-                            </a>
+                            <div>
+                                <span className="text-surface-400 text-xs">Attachment</span>
+                                <div className="mt-1">
+                                    <img
+                                        src={`http://localhost:8080${detailRecord.documentUrl}`}
+                                        alt="Attached document"
+                                        className="rounded-lg max-h-48 object-contain border border-surface-200"
+                                        onError={(e) => {
+                                            const el = e.currentTarget;
+                                            el.style.display = 'none';
+                                            const link = el.nextElementSibling as HTMLElement;
+                                            if (link) link.style.display = 'inline-flex';
+                                        }}
+                                    />
+                                    <a
+                                        href={`http://localhost:8080${detailRecord.documentUrl}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-primary-600 hover:underline items-center gap-1"
+                                        style={{ display: 'none' }}
+                                    >
+                                        <FileText size={14} className="inline mr-1" />
+                                        View document
+                                    </a>
+                                </div>
+                            </div>
                         )}
 
-                        <div className="flex gap-3 justify-end pt-4 border-t border-surface-100">
-                            <button onClick={() => { setDetailRecord(null); setApproveTarget(detailRecord); }} className="btn-success">
-                                <Check size={16} /> Approve
-                            </button>
-                            <button onClick={() => { setDetailRecord(null); setRejectTarget(detailRecord); }} className="btn-danger">
-                                <X size={16} /> Reject
-                            </button>
-                        </div>
+                        {detailRecord.status === 'PENDING' && (
+                            <div className="flex gap-3 justify-end pt-4 border-t border-surface-100">
+                                <button onClick={() => { setDetailRecord(null); setApproveTarget(detailRecord); }} className="btn-success">
+                                    <Check size={16} /> Approve
+                                </button>
+                                <button onClick={() => { setDetailRecord(null); setRejectTarget(detailRecord); }} className="btn-danger">
+                                    <X size={16} /> Reject
+                                </button>
+                            </div>
+                        )}
                     </div>
                 )}
             </Modal>
@@ -351,6 +646,14 @@ export default function ApprovalPage() {
                 status={mapModalData?.status || null}
                 locationStatus={mapModalData?.locationStatus ?? null}
                 officeAreas={officeAreas}
+            />
+
+            {/* GPS History Modal */}
+            <GpsHistoryModal
+                open={!!gpsHistoryUser}
+                onClose={() => setGpsHistoryUser(null)}
+                userId={gpsHistoryUser?.id || 0}
+                userName={gpsHistoryUser?.name || ''}
             />
         </div>
     );

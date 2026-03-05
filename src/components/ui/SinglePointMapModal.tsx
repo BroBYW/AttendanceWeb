@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, Circle, Polygon, GeoJSON } from 'react-leaflet';
 import type { OfficeAreaResponse } from '../../types';
 import L from 'leaflet';
@@ -22,6 +22,21 @@ function MapResizer() {
         observer.observe(map.getContainer());
         return () => observer.disconnect();
     }, [map]);
+    return null;
+}
+
+// Component to auto-open the parent Marker's popup once the map is ready
+function AutoOpenPopup({ markerRef }: { markerRef: React.RefObject<L.Marker | null> }) {
+    const map = useMap();
+    useEffect(() => {
+        // Short delay to ensure map + marker are fully rendered
+        const timer = setTimeout(() => {
+            if (markerRef.current) {
+                markerRef.current.openPopup();
+            }
+        }, 300);
+        return () => clearTimeout(timer);
+    }, [map, markerRef]);
     return null;
 }
 
@@ -57,11 +72,16 @@ function pointInPolygon(lat: number, lng: number, ring: number[][]): boolean {
  */
 function findContainingBlock(
     lat: number, lng: number,
-    polygonRings: { blockno: number; taskno: number; ring: number[][] }[]
+    polygonRings: { estate: string; division: number; blockno: number; taskno: number; ring: number[][] }[]
 ): string | null {
     for (const p of polygonRings) {
         if (pointInPolygon(lat, lng, p.ring)) {
-            return `Block ${p.blockno}, Task ${p.taskno}`;
+            const parts: string[] = [];
+            if (p.estate) parts.push(p.estate);
+            if (p.division) parts.push(`D${p.division}`);
+            if (p.blockno) parts.push(`B${p.blockno}`);
+            if (p.taskno) parts.push(`T${p.taskno}`);
+            return parts.join(' · ') || 'Unknown';
         }
     }
     return null;
@@ -83,6 +103,7 @@ interface Props {
 }
 
 export default function SinglePointMapModal({ open, onClose, latitude, longitude, title, time, status, locationStatus, officeAreas = [] }: Props) {
+    const markerRef = useRef<L.Marker | null>(null);
     const [kmlPolygons, setKmlPolygons] = useState<{ id: number; name: string; coordinates: [number, number][] }[]>([]);
 
     // Parse GeoJSON data from office areas
@@ -103,20 +124,22 @@ export default function SinglePointMapModal({ open, onClose, latitude, longitude
 
     // Extract polygon rings for point-in-polygon detection
     const polygonRings = useMemo(() => {
-        const rings: { blockno: number; taskno: number; ring: number[][] }[] = [];
+        const rings: { estate: string; division: number; blockno: number; taskno: number; ring: number[][] }[] = [];
         for (const layer of geojsonLayers) {
             if (!layer.data.features) continue;
             for (const feature of layer.data.features) {
                 const geom = feature.geometry;
                 const props = feature.properties || {};
+                const estate = String(props.Estate || '');
+                const division = Number(props.Division || 0);
                 const blockno = Number(props.Blockno || 0);
                 const taskno = Number(props.TaskNo ?? props.Taskno ?? 0);
                 if (geom.type === 'Polygon' && geom.coordinates?.[0]) {
-                    rings.push({ blockno, taskno, ring: geom.coordinates[0] as number[][] });
+                    rings.push({ estate, division, blockno, taskno, ring: geom.coordinates[0] as number[][] });
                 } else if (geom.type === 'MultiPolygon') {
                     for (const poly of geom.coordinates) {
                         if (poly[0]) {
-                            rings.push({ blockno, taskno, ring: poly[0] as number[][] });
+                            rings.push({ estate, division, blockno, taskno, ring: poly[0] as number[][] });
                         }
                     }
                 }
@@ -245,13 +268,18 @@ export default function SinglePointMapModal({ open, onClose, latitude, longitude
                                     return { color, weight: 2.5, opacity: 0.9, fillColor: color, fillOpacity: 0.15 };
                                 }}
                                 onEachFeature={(feature, featureLayer) => {
-                                    if (feature.properties?.Blockno) {
+                                    if (feature.properties) {
                                         const props = feature.properties;
                                         const taskNo = props.TaskNo ?? props.Taskno;
-                                        const label = `Block ${props.Blockno}` +
-                                            (taskNo ? ` · Task ${taskNo}` : '') +
-                                            (props.AreaHa ? ` · ${props.AreaHa} ha` : '');
-                                        featureLayer.bindTooltip(label, { sticky: true });
+                                        const parts: string[] = [];
+                                        if (props.Estate) parts.push(`Estate: ${props.Estate}`);
+                                        if (props.Division != null) parts.push(`Div ${props.Division}`);
+                                        if (props.Blockno) parts.push(`Block ${props.Blockno}`);
+                                        if (taskNo) parts.push(`Task ${taskNo}`);
+                                        if (props.AreaHa) parts.push(`${props.AreaHa} ha`);
+                                        if (parts.length > 0) {
+                                            featureLayer.bindTooltip(parts.join(' · '), { sticky: true });
+                                        }
                                     }
                                 }}
                             />
@@ -259,8 +287,9 @@ export default function SinglePointMapModal({ open, onClose, latitude, longitude
 
                         <Marker
                             position={position}
-                            ref={(ref) => { if (ref) ref.openPopup(); }}
+                            ref={markerRef}
                         >
+                            <AutoOpenPopup markerRef={markerRef} />
                             <Popup>
                                 <div className="text-xs leading-relaxed">
                                     <strong>Time:</strong> {time || '—'}<br />
@@ -269,7 +298,17 @@ export default function SinglePointMapModal({ open, onClose, latitude, longitude
                                     {polygonRings.length > 0 && (
                                         <>
                                             <strong>Polygon:</strong>{' '}
-                                            {polygonResult ? (
+                                            {locationStatus ? (
+                                                <span style={{
+                                                    color: locationStatus === 'Normal' ? '#10b981'
+                                                        : locationStatus === 'Outstation' ? '#f59e0b'
+                                                            : '#ef4444',
+                                                    fontWeight: 600
+                                                }}>
+                                                    {locationStatus === 'Normal' ? '✓' : locationStatus === 'Outstation' ? '⚠' : '✗'} {locationStatus}
+                                                    {locationStatus === 'Normal' && polygonResult ? ` (${polygonResult})` : ''}
+                                                </span>
+                                            ) : polygonResult ? (
                                                 <span style={{ color: '#10b981', fontWeight: 600 }}>
                                                     ✓ Inside ({polygonResult})
                                                 </span>
@@ -288,12 +327,8 @@ export default function SinglePointMapModal({ open, onClose, latitude, longitude
                 {/* Bottom status bar with frontend polygon detection */}
                 <div className="flex items-center justify-between pt-3 border-t border-surface-200 mt-3">
                     <div className="flex items-center gap-2">
-                        <span className="text-sm text-surface-500">Polygon status:</span>
-                        {polygonRings.length > 0 ? (
-                            <span className={polygonResult ? 'badge-success' : 'badge-warning'}>
-                                {polygonResult ? `✓ Inside (${polygonResult})` : '✗ Outside polygon'}
-                            </span>
-                        ) : locationStatus != null ? (
+                        <span className="text-sm text-surface-500">Location status:</span>
+                        {locationStatus != null ? (
                             <span
                                 className={locationStatus === 'Normal'
                                     ? 'badge-success'
@@ -302,6 +337,10 @@ export default function SinglePointMapModal({ open, onClose, latitude, longitude
                                         : 'badge-warning'}
                             >
                                 {locationStatus}
+                            </span>
+                        ) : polygonRings.length > 0 ? (
+                            <span className={polygonResult ? 'badge-success' : 'badge-warning'}>
+                                {polygonResult ? `✓ Inside (${polygonResult})` : '✗ Outside polygon'}
                             </span>
                         ) : (
                             <span className="text-sm text-surface-400">No polygon data</span>

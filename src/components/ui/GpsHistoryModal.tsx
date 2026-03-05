@@ -1,12 +1,66 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import Modal from './Modal';
 import type { GpsLogResponse, OfficeAreaResponse } from '../../types';
 import { getUserGpsLogs } from '../../services/gpsLogService';
 import { officeAreaService } from '../../services/officeAreaService';
 import { PageLoader } from './LoadingSpinner';
 import toast from 'react-hot-toast';
-import { MapPin, Map, List } from 'lucide-react';
+import { MapPin, Map, List, RefreshCw } from 'lucide-react';
 import GpsMap from './GpsMap';
+
+/**
+ * Ray-casting point-in-polygon test.
+ * ring is an array of [lng, lat] pairs (GeoJSON order).
+ */
+function pointInPolygon(lat: number, lng: number, ring: number[][]): boolean {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const xi = ring[i][1], yi = ring[i][0];
+        const xj = ring[j][1], yj = ring[j][0];
+        const intersect = ((yi > lng) !== (yj > lng)) &&
+            (lat < (xj - xi) * (lng - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
+    }
+    return inside;
+}
+
+/**
+ * Find the containing GeoJSON block for a point.
+ */
+function findContainingBlock(
+    lat: number, lng: number,
+    polygonRings: { estate: string; division: number; blockno: number; taskno: number; ring: number[][] }[]
+): string | null {
+    for (const p of polygonRings) {
+        if (pointInPolygon(lat, lng, p.ring)) {
+            const parts: string[] = [];
+            if (p.estate) parts.push(p.estate);
+            if (p.division) parts.push(`D${p.division}`);
+            if (p.blockno) parts.push(`B${p.blockno}`);
+            if (p.taskno) parts.push(`T${p.taskno}`);
+            return parts.join(' · ') || 'Unknown';
+        }
+    }
+    return null;
+}
+
+/**
+ * Find the containing KML polygon name for a point.
+ * KML coordinates are stored as [lat, lng] (Leaflet order).
+ */
+function findContainingKml(
+    lat: number, lng: number,
+    kmlPolygons: { name: string; coordinates: [number, number][] }[]
+): string | null {
+    for (const p of kmlPolygons) {
+        // Convert [lat, lng] to [lng, lat] ring for pointInPolygon
+        const ring = p.coordinates.map(c => [c[1], c[0]]);
+        if (pointInPolygon(lat, lng, ring)) {
+            return p.name;
+        }
+    }
+    return null;
+}
 
 interface Props {
     open: boolean;
@@ -20,12 +74,15 @@ export default function GpsHistoryModal({ open, onClose, userId, userName }: Pro
     const [officeAreas, setOfficeAreas] = useState<OfficeAreaResponse[]>([]);
     const [loading, setLoading] = useState(false);
     const [viewMode, setViewMode] = useState<'map' | 'table' | 'split'>('split');
+    const [selectedLogId, setSelectedLogId] = useState<number | null>(null);
 
     useEffect(() => {
         if (open && userId) {
             fetchLogs();
+            setSelectedLogId(null); // Reset selection
         } else {
             setLogs([]); // Reset on close
+            setSelectedLogId(null);
         }
     }, [open, userId]);
 
@@ -47,6 +104,84 @@ export default function GpsHistoryModal({ open, onClose, userId, userName }: Pro
         }
     };
 
+    // Extract GeoJSON polygon rings for point-in-polygon checks
+    const polygonRings = useMemo(() => {
+        const rings: { estate: string; division: number; blockno: number; taskno: number; ring: number[][] }[] = [];
+        for (const area of officeAreas) {
+            if (area.geojsonData) {
+                try {
+                    const parsed = JSON.parse(area.geojsonData) as GeoJSON.FeatureCollection;
+                    if (parsed.features) {
+                        for (const feature of parsed.features) {
+                            const props = feature.properties || {};
+                            const estate = String(props.Estate || '');
+                            const division = Number(props.Division || 0);
+                            const blockno = Number(props.Blockno || 0);
+                            const taskno = Number(props.TaskNo ?? props.Taskno ?? 0);
+                            const geom = feature.geometry;
+                            if (geom.type === 'Polygon') {
+                                rings.push({ estate, division, blockno, taskno, ring: (geom as any).coordinates[0] });
+                            } else if (geom.type === 'MultiPolygon') {
+                                for (const poly of (geom as any).coordinates) {
+                                    rings.push({ estate, division, blockno, taskno, ring: poly[0] });
+                                }
+                            }
+                        }
+                    }
+                } catch { /* skip */ }
+            }
+        }
+        return rings;
+    }, [officeAreas]);
+
+    // Fetch and parse KML polygons
+    const [kmlPolygons, setKmlPolygons] = useState<{ name: string; coordinates: [number, number][] }[]>([]);
+    useEffect(() => {
+        const fetchKml = async () => {
+            const result: { name: string; coordinates: [number, number][] }[] = [];
+            for (const area of officeAreas) {
+                if (area.polygonFileUrl && !area.geojsonData) {
+                    try {
+                        const res = await fetch(`http://localhost:8080${area.polygonFileUrl}`);
+                        if (!res.ok) continue;
+                        const kmlText = await res.text();
+                        const parser = new DOMParser();
+                        const xmlDoc = parser.parseFromString(kmlText, 'text/xml');
+                        const coordsNode = xmlDoc.getElementsByTagName('coordinates')[0];
+                        if (coordsNode?.textContent) {
+                            const coords: [number, number][] = [];
+                            for (const c of coordsNode.textContent.trim().split(/\s+/)) {
+                                const parts = c.split(',');
+                                if (parts.length >= 2) {
+                                    const lng = parseFloat(parts[0]);
+                                    const lat = parseFloat(parts[1]);
+                                    if (!isNaN(lat) && !isNaN(lng)) coords.push([lat, lng]);
+                                }
+                            }
+                            if (coords.length > 0) result.push({ name: area.name, coordinates: coords });
+                        }
+                    } catch { /* skip */ }
+                }
+            }
+            setKmlPolygons(result);
+        };
+        fetchKml();
+    }, [officeAreas]);
+
+    /** Build the polygon detail string for a given point */
+    const getPolygonDetail = (lat: number, lng: number): string | null => {
+        // Check GeoJSON blocks first
+        const blockInfo = polygonRings.length > 0
+            ? findContainingBlock(lat, lng, polygonRings)
+            : null;
+        if (blockInfo) return blockInfo;
+        // Check KML polygons
+        const kmlInfo = kmlPolygons.length > 0
+            ? findContainingKml(lat, lng, kmlPolygons)
+            : null;
+        return kmlInfo;
+    };
+
     const getStatusStyles = (status: string | null) => {
         switch (status) {
             case 'NORMAL':
@@ -60,6 +195,22 @@ export default function GpsHistoryModal({ open, onClose, userId, userName }: Pro
         }
     };
 
+    const getStatusLabel = (status: string | null): string => {
+        switch (status) {
+            case 'NORMAL': return '✓ Normal';
+            case 'OUTSTATION': return '⚠ Outstation';
+            case 'OUTSIDE': return '✗ Outside';
+            default: return status || 'UNKNOWN';
+        }
+    };
+
+    const handleLogClick = (log: GpsLogResponse) => {
+        setSelectedLogId(log.id);
+        if (viewMode === 'table') {
+            setViewMode('split');
+        }
+    };
+
     return (
         <Modal
             open={open}
@@ -69,6 +220,15 @@ export default function GpsHistoryModal({ open, onClose, userId, userName }: Pro
         >
             <div className="flex flex-col h-[85vh]">
                 <div className="flex items-center justify-end gap-2 mb-4">
+                    <button
+                        onClick={fetchLogs}
+                        disabled={loading}
+                        className="btn-sm btn-secondary mr-auto flex items-center gap-1.5"
+                        title="Refresh GPS logs"
+                    >
+                        <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+                        Refresh
+                    </button>
                     <span className="text-sm text-surface-500 font-medium mr-2">View:</span>
                     <button
                         onClick={() => setViewMode('map')}
@@ -109,7 +269,7 @@ export default function GpsHistoryModal({ open, onClose, userId, userName }: Pro
                                     <span className="text-xs text-primary-600 bg-primary-50 px-2 py-0.5 rounded-full">{logs.length} Points</span>
                                 </div>
                                 <div className="flex-1 relative z-0 min-h-[300px]">
-                                    <GpsMap logs={logs} officeAreas={officeAreas} />
+                                    <GpsMap logs={logs} officeAreas={officeAreas} selectedLogId={selectedLogId} />
                                 </div>
                             </div>
                         )}
@@ -130,33 +290,46 @@ export default function GpsHistoryModal({ open, onClose, userId, userName }: Pro
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-surface-100 bg-white">
-                                            {logs.map((log) => (
-                                                <tr key={log.id} className="hover:bg-primary-50 transition-colors">
-                                                    <td className="px-4 py-3">
-                                                        <div className="font-semibold text-surface-900">
-                                                            {new Date(log.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                                                        </div>
-                                                        <div className="text-xs text-surface-500 mt-0.5">
-                                                            {new Date(log.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
-                                                        </div>
-                                                    </td>
-                                                    <td className="px-4 py-3">
-                                                        <div className="font-mono text-[11px] text-surface-600 bg-surface-100 inline-block px-1.5 py-0.5 rounded">
-                                                            {log.latitude.toFixed(6)}, {log.longitude.toFixed(6)}
-                                                        </div>
-                                                        {log.accuracy && (
-                                                            <div className="text-[10px] text-surface-400 mt-1">
-                                                                Accuracy ±{log.accuracy.toFixed(0)}m
+                                            {logs.map((log) => {
+                                                const polyDetail = getPolygonDetail(log.latitude, log.longitude);
+                                                const isSelected = selectedLogId === log.id;
+                                                return (
+                                                    <tr
+                                                        key={log.id}
+                                                        onClick={() => handleLogClick(log)}
+                                                        className={`cursor-pointer transition-colors ${isSelected ? 'bg-primary-50 ring-1 ring-inset ring-primary-500' : 'hover:bg-primary-50'}`}
+                                                    >
+                                                        <td className="px-4 py-3">
+                                                            <div className="font-semibold text-surface-900">
+                                                                {new Date(log.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
                                                             </div>
-                                                        )}
-                                                    </td>
-                                                    <td className="px-4 py-3">
-                                                        <span className={`px-2 py-0.5 rounded text-xs font-semibold border ${getStatusStyles(log.areaStatus)}`}>
-                                                            {log.areaStatus || 'UNKNOWN'}
-                                                        </span>
-                                                    </td>
-                                                </tr>
-                                            ))}
+                                                            <div className="text-xs text-surface-500 mt-0.5">
+                                                                {new Date(log.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-4 py-3">
+                                                            <div className="font-mono text-[11px] text-surface-600 bg-surface-100 inline-block px-1.5 py-0.5 rounded">
+                                                                {log.latitude.toFixed(6)}, {log.longitude.toFixed(6)}
+                                                            </div>
+                                                            {log.accuracy && (
+                                                                <div className="text-[10px] text-surface-400 mt-1">
+                                                                    Accuracy ±{log.accuracy.toFixed(0)}m
+                                                                </div>
+                                                            )}
+                                                        </td>
+                                                        <td className="px-4 py-3">
+                                                            <span className={`px-2 py-0.5 rounded text-xs font-semibold border ${getStatusStyles(log.areaStatus)}`}>
+                                                                {getStatusLabel(log.areaStatus)}
+                                                            </span>
+                                                            {polyDetail && (
+                                                                <div className="text-[10px] text-success-700 mt-1 font-medium">
+                                                                    ({polyDetail})
+                                                                </div>
+                                                            )}
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
                                         </tbody>
                                     </table>
                                 </div>

@@ -79,7 +79,7 @@ function PolygonLayer({ geojsonData, polygonFileUrl }: { geojsonData?: string | 
                 const layer = L.geoJSON(parsed, {
                     style: (feature) => getBlockStyle(feature as GeoJSON.Feature),
                     onEachFeature: (feature, layer) => {
-                        if (feature.properties?.Blockno) {
+                        if (feature.properties) {
                             const props = feature.properties;
                             // Normalize property names (handle TaskNo vs Taskno, etc.)
                             const taskNo = props.TaskNo ?? props.Taskno;
@@ -88,18 +88,25 @@ function PolygonLayer({ geojsonData, polygonFileUrl }: { geojsonData?: string | 
                             const edb = props.EDB ?? props.Edb;
 
                             // Hover tooltip (short label)
-                            const label = `Block ${props.Blockno}` +
-                                (taskNo ? ` · Task ${taskNo}` : '') +
-                                (props.AreaHa ? ` · ${props.AreaHa} ha` : '');
-                            layer.bindTooltip(label, { sticky: true, className: 'block-tooltip' });
+                            const parts: string[] = [];
+                            if (props.Estate) parts.push(`Estate: ${props.Estate}`);
+                            if (props.Division != null) parts.push(`Div ${props.Division}`);
+                            if (props.Blockno) parts.push(`Block ${props.Blockno}`);
+                            if (taskNo) parts.push(`Task ${taskNo}`);
+                            if (props.AreaHa) parts.push(`${props.AreaHa} ha`);
+                            if (parts.length > 0) {
+                                layer.bindTooltip(parts.join(' · '), { sticky: true, className: 'block-tooltip' });
+                            }
 
                             // Click popup (detailed info)
                             const popupHtml = `
                                 <div style="font-family: system-ui, sans-serif; min-width: 160px;">
                                     <div style="font-weight: 700; font-size: 14px; margin-bottom: 6px; color: #1e293b;">
-                                        Block ${props.Blockno}
+                                        ${props.Estate ? `${props.Estate} ` : ''}${props.Blockno ? `Block ${props.Blockno}` : 'Area Details'}
                                     </div>
                                     <table style="font-size: 12px; color: #475569; border-collapse: collapse; width: 100%;">
+                                        ${props.Estate ? `<tr><td style="padding: 2px 8px 2px 0; font-weight: 600;">Estate</td><td>${props.Estate}</td></tr>` : ''}
+                                        ${props.Division != null ? `<tr><td style="padding: 2px 8px 2px 0; font-weight: 600;">Division</td><td>${props.Division}</td></tr>` : ''}
                                         ${taskNo ? `<tr><td style="padding: 2px 8px 2px 0; font-weight: 600;">Task</td><td>${taskNo}</td></tr>` : ''}
                                         ${ed ? `<tr><td style="padding: 2px 8px 2px 0; font-weight: 600;">ED</td><td>${ed}</td></tr>` : ''}
                                         ${edb ? `<tr><td style="padding: 2px 8px 2px 0; font-weight: 600;">EDB</td><td>${edb}</td></tr>` : ''}
