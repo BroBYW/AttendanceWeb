@@ -353,7 +353,7 @@ export default function ApprovalPage() {
                                 )}
                                 {r.documentUrl && (
                                     <a
-                                        href={`http://localhost:8080${r.documentUrl}`}
+                                        href={`${import.meta.env.VITE_API_BASE_URL}${r.documentUrl}`}
                                         target="_blank"
                                         rel="noopener noreferrer"
                                         className="inline-flex items-center gap-1 mt-1 text-xs text-primary-600 hover:underline"
@@ -461,9 +461,9 @@ export default function ApprovalPage() {
                                 {detailRecord.clockInPhotoUrl && (
                                     <div className="col-span-2">
                                         <span className="text-surface-400">Selfie</span>
-                                        <a href={`http://localhost:8080${detailRecord.clockInPhotoUrl}`} target="_blank" rel="noopener noreferrer">
+                                        <a href={`${import.meta.env.VITE_API_BASE_URL}${detailRecord.clockInPhotoUrl}`} target="_blank" rel="noopener noreferrer">
                                             <img
-                                                src={`http://localhost:8080${detailRecord.clockInPhotoUrl}`}
+                                                src={`${import.meta.env.VITE_API_BASE_URL}${detailRecord.clockInPhotoUrl}`}
                                                 alt="Clock-in selfie"
                                                 className="mt-1 rounded-lg border border-surface-200 max-h-48 object-cover cursor-pointer hover:opacity-80 transition-opacity"
                                             />
@@ -513,9 +513,9 @@ export default function ApprovalPage() {
                                 {detailRecord.clockOutPhotoUrl && (
                                     <div className="col-span-2">
                                         <span className="text-surface-400">Selfie</span>
-                                        <a href={`http://localhost:8080${detailRecord.clockOutPhotoUrl}`} target="_blank" rel="noopener noreferrer">
+                                        <a href={`${import.meta.env.VITE_API_BASE_URL}${detailRecord.clockOutPhotoUrl}`} target="_blank" rel="noopener noreferrer">
                                             <img
-                                                src={`http://localhost:8080${detailRecord.clockOutPhotoUrl}`}
+                                                src={`${import.meta.env.VITE_API_BASE_URL}${detailRecord.clockOutPhotoUrl}`}
                                                 alt="Clock-out selfie"
                                                 className="mt-1 rounded-lg border border-surface-200 max-h-48 object-cover cursor-pointer hover:opacity-80 transition-opacity"
                                             />
@@ -545,7 +545,7 @@ export default function ApprovalPage() {
                                 <span className="text-surface-400 text-xs">Attachment</span>
                                 <div className="mt-1">
                                     <img
-                                        src={`http://localhost:8080${detailRecord.documentUrl}`}
+                                        src={`${import.meta.env.VITE_API_BASE_URL}${detailRecord.documentUrl}`}
                                         alt="Attached document"
                                         className="rounded-lg max-h-48 object-contain border border-surface-200"
                                         onError={(e) => {
@@ -556,7 +556,7 @@ export default function ApprovalPage() {
                                         }}
                                     />
                                     <a
-                                        href={`http://localhost:8080${detailRecord.documentUrl}`}
+                                        href={`${import.meta.env.VITE_API_BASE_URL}${detailRecord.documentUrl}`}
                                         target="_blank"
                                         rel="noopener noreferrer"
                                         className="text-primary-600 hover:underline items-center gap-1"
