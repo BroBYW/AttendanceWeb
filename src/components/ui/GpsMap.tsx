@@ -229,7 +229,7 @@ export default function GpsMap({ logs, officeAreas, selectedLogId }: Props) {
             for (const area of officeAreas) {
                 if (area.polygonFileUrl && !area.geojsonData) {
                     try {
-                        const response = await fetch(`http://localhost:8080${area.polygonFileUrl}`);
+                        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}${area.polygonFileUrl}`);
                         if (!response.ok) continue;
 
                         const kmlText = await response.text();

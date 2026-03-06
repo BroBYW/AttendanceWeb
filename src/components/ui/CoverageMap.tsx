@@ -166,7 +166,7 @@ function PolygonLayer({ geojsonData, polygonFileUrl }: { geojsonData?: string | 
         if (polygonFileUrl) {
             const url = polygonFileUrl.startsWith('http')
                 ? polygonFileUrl
-                : `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'}${polygonFileUrl.startsWith('/') ? '' : '/'}${polygonFileUrl}`;
+                : `${import.meta.env.VITE_API_BASE_URL || '${import.meta.env.VITE_API_BASE_URL}'}${polygonFileUrl.startsWith('/') ? '' : '/'}${polygonFileUrl}`;
 
             const customLayer = L.geoJSON(null, { style: () => defaultPolygonStyle });
             const runLayer = omnivore.kml(url, null, customLayer)

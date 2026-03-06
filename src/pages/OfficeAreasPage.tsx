@@ -81,7 +81,7 @@ export default function OfficeAreasPage() {
             try {
                 const kmlUrl = area.polygonFileUrl.startsWith('http')
                     ? area.polygonFileUrl
-                    : `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'}${area.polygonFileUrl.startsWith('/') ? '' : '/'}${area.polygonFileUrl}`;
+                    : `${import.meta.env.VITE_API_BASE_URL || '${import.meta.env.VITE_API_BASE_URL}'}${area.polygonFileUrl.startsWith('/') ? '' : '/'}${area.polygonFileUrl}`;
 
                 const response = await fetch(kmlUrl);
                 const kmlText = await response.text();

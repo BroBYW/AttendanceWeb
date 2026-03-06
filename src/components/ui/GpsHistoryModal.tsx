@@ -142,7 +142,7 @@ export default function GpsHistoryModal({ open, onClose, userId, userName }: Pro
             for (const area of officeAreas) {
                 if (area.polygonFileUrl && !area.geojsonData) {
                     try {
-                        const res = await fetch(`http://localhost:8080${area.polygonFileUrl}`);
+                        const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}${area.polygonFileUrl}`);
                         if (!res.ok) continue;
                         const kmlText = await res.text();
                         const parser = new DOMParser();
