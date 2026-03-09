@@ -187,43 +187,49 @@ export default function ApprovalPage() {
      *  3. Outside all areas → Outside Working Area
      */
     const determineLocationStatus = useCallback(
-        (lat: number | null, lng: number | null, userId: number): LocationStatusType => {
-            if (lat == null || lng == null || polygonRingsWithArea.length === 0) return 'Outside Working Area';
+        (lat: number | null, lng: number | null, userId: number): { status: LocationStatusType, areaName?: string } => {
+            if (lat == null || lng == null || polygonRingsWithArea.length === 0) return { status: 'Outside Working Area' };
 
             const assignedIds = userAssignments[userId] || [];
             let insideAnyArea = false;
+            let matchedAreaName = '';
 
             for (const { officeAreaId, ring } of polygonRingsWithArea) {
                 if (pointInPolygon(lat, lng, ring)) {
+                    const area = officeAreas.find(a => a.id === officeAreaId);
                     if (assignedIds.includes(officeAreaId)) {
-                        return 'Normal';
+                        return { status: 'Normal', areaName: area?.name };
                     }
                     insideAnyArea = true;
+                    matchedAreaName = area?.name || '';
                 }
             }
 
-            return insideAnyArea ? 'Outstation' : 'Outside Working Area';
+            return { 
+                status: insideAnyArea ? 'Outstation' : 'Outside Working Area',
+                areaName: insideAnyArea ? matchedAreaName : undefined
+            };
         },
-        [polygonRingsWithArea, userAssignments]
+        [polygonRingsWithArea, userAssignments, officeAreas]
     );
 
     /** Derive location status for clock-in using user-aware polygon check */
-    const getClockInLocationStatus = (r: AttendanceResponse): LocationStatusType => {
+    const getClockInLocationStatus = (r: AttendanceResponse): { status: LocationStatusType, areaName?: string } => {
         if (polygonRingsWithArea.length > 0 && r.clockInLat != null && r.clockInLng != null) {
             return determineLocationStatus(r.clockInLat, r.clockInLng, r.userId);
         }
-        if (r.clockInType === 'OUTSTATION') return 'Outstation';
-        if (r.inGeofence === false) return 'Outside Working Area';
-        return 'Normal';
+        if (r.clockInType === 'OUTSTATION') return { status: 'Outstation', areaName: r.officeAreaName || undefined };
+        if (r.inGeofence === false) return { status: 'Outside Working Area' };
+        return { status: 'Normal', areaName: r.officeAreaName || undefined };
     };
 
     /** Derive location status for clock-out using user-aware polygon check */
-    const getClockOutLocationStatus = (r: AttendanceResponse): LocationStatusType => {
+    const getClockOutLocationStatus = (r: AttendanceResponse): { status: LocationStatusType, areaName?: string } => {
         if (polygonRingsWithArea.length > 0 && r.clockOutLat != null && r.clockOutLng != null) {
             return determineLocationStatus(r.clockOutLat, r.clockOutLng, r.userId);
         }
-        if (r.clockOutInGeofence === false) return 'Outside Working Area';
-        return 'Normal';
+        if (r.clockOutInGeofence === false) return { status: 'Outside Working Area' };
+        return { status: 'Normal', areaName: r.officeAreaName || undefined };
     };
 
     if (loading && records.length === 0) return <PageLoader />;
@@ -277,16 +283,23 @@ export default function ApprovalPage() {
                                     {/* Clock In */}
                                     <span className="flex items-center gap-1">
                                         Clock-in: {formatTime(r.clockInTime)}
-                                        <span
-                                            className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${getClockInLocationStatus(r) === 'Normal'
-                                                ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20'
-                                                : getClockInLocationStatus(r) === 'Outstation'
-                                                    ? 'bg-primary-100 text-primary-700'
-                                                    : 'bg-amber-100 text-amber-700'
-                                                }`}
-                                        >
-                                            {getClockInLocationStatus(r)}
-                                        </span>
+                                        <div className="flex flex-col items-center">
+                                            <span
+                                                className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${getClockInLocationStatus(r).status === 'Normal'
+                                                    ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20'
+                                                    : getClockInLocationStatus(r).status === 'Outstation'
+                                                        ? 'bg-primary-100 text-primary-700'
+                                                        : 'bg-amber-100 text-amber-700'
+                                                    }`}
+                                            >
+                                                {getClockInLocationStatus(r).status}
+                                            </span>
+                                            {getClockInLocationStatus(r).areaName && (
+                                                <span className="text-[10px] text-surface-500">
+                                                    ({getClockInLocationStatus(r).areaName})
+                                                </span>
+                                            )}
+                                        </div>
                                         {r.clockInLat && r.clockInLng && (
                                             <button
                                                 onClick={() => setMapModalData({
@@ -295,7 +308,7 @@ export default function ApprovalPage() {
                                                     title: `Clock In Location: ${r.userName}`,
                                                     time: r.clockInTime ? new Date(r.clockInTime).toLocaleTimeString() : null,
                                                     status: r.clockInType || 'UNKNOWN',
-                                                    locationStatus: getClockInLocationStatus(r)
+                                                    locationStatus: getClockInLocationStatus(r).status
                                                 })}
                                                 className="text-primary-600 hover:text-primary-800 hover:underline inline-flex items-center"
                                                 title="View Map"
@@ -308,16 +321,23 @@ export default function ApprovalPage() {
                                     <span className="flex items-center gap-1">
                                         Clock-out: {formatTime(r.clockOutTime)}
                                         {r.clockOutTime && (
-                                            <span
-                                                className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${getClockOutLocationStatus(r) === 'Normal'
-                                                    ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20'
-                                                    : getClockOutLocationStatus(r) === 'Outstation'
-                                                        ? 'bg-primary-100 text-primary-700'
-                                                        : 'bg-amber-100 text-amber-700'
-                                                    }`}
-                                            >
-                                                {getClockOutLocationStatus(r)}
-                                            </span>
+                                            <div className="flex flex-col items-center">
+                                                <span
+                                                    className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${getClockOutLocationStatus(r).status === 'Normal'
+                                                        ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20'
+                                                        : getClockOutLocationStatus(r).status === 'Outstation'
+                                                            ? 'bg-primary-100 text-primary-700'
+                                                            : 'bg-amber-100 text-amber-700'
+                                                        }`}
+                                                >
+                                                    {getClockOutLocationStatus(r).status}
+                                                </span>
+                                                {getClockOutLocationStatus(r).areaName && (
+                                                    <span className="text-[10px] text-surface-500">
+                                                        ({getClockOutLocationStatus(r).areaName})
+                                                    </span>
+                                                )}
+                                            </div>
                                         )}
                                         {r.clockOutLat && r.clockOutLng && (
                                             <button
@@ -327,7 +347,7 @@ export default function ApprovalPage() {
                                                     title: `Clock Out Location: ${r.userName}`,
                                                     time: r.clockOutTime ? new Date(r.clockOutTime).toLocaleTimeString() : null,
                                                     status: r.clockOutType || 'UNKNOWN',
-                                                    locationStatus: getClockOutLocationStatus(r)
+                                                    locationStatus: getClockOutLocationStatus(r).status
                                                 })}
                                                 className="text-primary-600 hover:text-primary-800 hover:underline inline-flex items-center"
                                                 title="View Map"
@@ -437,17 +457,22 @@ export default function ApprovalPage() {
                                 </div>
                                 <div>
                                     <span className="text-surface-400">Location Status</span>
-                                    <div className="mt-1">
+                                    <div className="mt-1 flex flex-col">
                                         <span
-                                            className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${getClockInLocationStatus(detailRecord) === 'Normal'
+                                            className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium w-fit ${getClockInLocationStatus(detailRecord).status === 'Normal'
                                                 ? 'bg-success-100 text-success-700'
-                                                : getClockInLocationStatus(detailRecord) === 'Outstation'
+                                                : getClockInLocationStatus(detailRecord).status === 'Outstation'
                                                     ? 'bg-primary-100 text-primary-700'
                                                     : 'bg-amber-100 text-amber-700'
                                                 }`}
                                         >
-                                            {getClockInLocationStatus(detailRecord)}
+                                            {getClockInLocationStatus(detailRecord).status}
                                         </span>
+                                        {getClockInLocationStatus(detailRecord).areaName && (
+                                            <span className="text-[10px] text-surface-500 mt-0.5">
+                                                ({getClockInLocationStatus(detailRecord).areaName})
+                                            </span>
+                                        )}
                                     </div>
                                 </div>
                                 <div>
@@ -488,17 +513,22 @@ export default function ApprovalPage() {
                                 {detailRecord.clockOutTime && (
                                     <div>
                                         <span className="text-surface-400">Location Status</span>
-                                        <div className="mt-1">
+                                        <div className="mt-1 flex flex-col">
                                             <span
-                                                className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${getClockOutLocationStatus(detailRecord) === 'Normal'
+                                                className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium w-fit ${getClockOutLocationStatus(detailRecord).status === 'Normal'
                                                     ? 'bg-success-100 text-success-700'
-                                                    : getClockOutLocationStatus(detailRecord) === 'Outstation'
+                                                    : getClockOutLocationStatus(detailRecord).status === 'Outstation'
                                                         ? 'bg-primary-100 text-primary-700'
                                                         : 'bg-amber-100 text-amber-700'
                                                     }`}
                                             >
-                                                {getClockOutLocationStatus(detailRecord)}
+                                                {getClockOutLocationStatus(detailRecord).status}
                                             </span>
+                                            {getClockOutLocationStatus(detailRecord).areaName && (
+                                                <span className="text-[10px] text-surface-500 mt-0.5">
+                                                    ({getClockOutLocationStatus(detailRecord).areaName})
+                                                </span>
+                                            )}
                                         </div>
                                     </div>
                                 )}
