@@ -326,6 +326,11 @@ export default function GpsHistoryModal({ open, onClose, userId, userName }: Pro
                                                                     ({polyDetail})
                                                                 </div>
                                                             )}
+                                                            {log.remark && (
+                                                                <div className="text-[11px] text-primary-700 mt-2 font-medium italic bg-primary-50 px-1.5 py-0.5 rounded border border-primary-200 w-max max-w-[200px] truncate whitespace-normal leading-tight" title={log.remark}>
+                                                                    Note: {log.remark}
+                                                                </div>
+                                                            )}
                                                         </td>
                                                     </tr>
                                                 );

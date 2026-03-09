@@ -132,6 +132,7 @@ export interface GpsLogResponse {
     timestamp: string;
     accuracy: number | null;
     areaStatus: AreaStatus | null;
+    remark: string | null;
 }
 
 // ─── API Wrapper ────────────────────────────────────────────

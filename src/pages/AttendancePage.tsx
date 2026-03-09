@@ -14,6 +14,8 @@ import { PageLoader } from '../components/ui/LoadingSpinner';
 import toast from 'react-hot-toast';
 
 export default function AttendancePage() {
+    type AttendanceBehaviorFilter = '' | 'LATE_CLOCK_IN' | 'EARLY_CLOCK_OUT' | 'OUTSTATION' | 'OUTSIDE_WORKING_AREA';
+    const PAGE_SIZE = 20;
     const [records, setRecords] = useState<AttendanceResponse[]>([]);
     const [officeAreas, setOfficeAreas] = useState<OfficeAreaResponse[]>([]);
     // Map of userId -> assignedOfficeAreaIds for user-aware location status
@@ -37,7 +39,8 @@ export default function AttendancePage() {
     const [filterStatus, setFilterStatus] = useState<AttendanceStatus | ''>('');
     const [filterStartDate, setFilterStartDate] = useState('');
     const [filterEndDate, setFilterEndDate] = useState('');
-    const [filterUserId, setFilterUserId] = useState('');
+    const [filterEmployeeId, setFilterEmployeeId] = useState('');
+    const [filterAttendanceBehavior, setFilterAttendanceBehavior] = useState<AttendanceBehaviorFilter>('');
 
     useEffect(() => {
         loadRecords();
@@ -84,13 +87,75 @@ export default function AttendancePage() {
     const loadRecords = async () => {
         setLoading(true);
         try {
-            const filters: AttendanceFilters = { page, size: 20 };
+            const filters: AttendanceFilters = {};
             if (filterStatus) filters.status = filterStatus;
             if (filterStartDate) filters.startDate = filterStartDate;
             if (filterEndDate) filters.endDate = filterEndDate;
-            if (filterUserId) filters.userId = parseInt(filterUserId);
+            if (filterEmployeeId.trim()) {
+                const keyword = filterEmployeeId.trim().toLowerCase();
+                const userRes = await userService.getAll();
+                if (!userRes.success) {
+                    toast.error('Failed to load users for Employee ID filter');
+                    setRecords([]);
+                    setTotalPages(0);
+                    return;
+                }
+                const exactMatch = userRes.data.find((u) => u.employeeId.toLowerCase() === keyword);
+                const partialMatches = userRes.data.filter((u) => u.employeeId.toLowerCase().includes(keyword));
+                const matchedUser = exactMatch ?? (partialMatches.length === 1 ? partialMatches[0] : null);
 
-            const res = await attendanceService.getAll(filters);
+                if (!matchedUser) {
+                    setRecords([]);
+                    setTotalPages(0);
+                    return;
+                }
+                filters.userId = matchedUser.id;
+            }
+
+            if (filterAttendanceBehavior) {
+                const firstRes = await attendanceService.getAll({ ...filters, page: 0, size: 100 });
+                if (!firstRes.success) {
+                    setRecords([]);
+                    setTotalPages(0);
+                    return;
+                }
+
+                const allRecords = [...firstRes.data.content];
+                for (let nextPage = 1; nextPage < firstRes.data.totalPages; nextPage++) {
+                    const nextRes = await attendanceService.getAll({ ...filters, page: nextPage, size: 100 });
+                    if (nextRes.success) {
+                        allRecords.push(...nextRes.data.content);
+                    }
+                }
+
+                const behaviorFiltered = allRecords.filter((record) => {
+                    if (filterAttendanceBehavior === 'LATE_CLOCK_IN') return record.clockInType === 'LATE';
+                    if (filterAttendanceBehavior === 'EARLY_CLOCK_OUT') return record.clockOutType === 'EARLY';
+                    if (filterAttendanceBehavior === 'OUTSTATION') {
+                        return getClockInLocationStatus(record) === 'Outstation'
+                            || getClockOutLocationStatus(record) === 'Outstation';
+                    }
+                    if (filterAttendanceBehavior === 'OUTSIDE_WORKING_AREA') {
+                        return getClockInLocationStatus(record) === 'Outside Working Area'
+                            || getClockOutLocationStatus(record) === 'Outside Working Area';
+                    }
+                    return true;
+                });
+
+                const computedTotalPages = Math.ceil(behaviorFiltered.length / PAGE_SIZE);
+                const safePage = computedTotalPages > 0 ? Math.min(page, computedTotalPages - 1) : 0;
+                const startIndex = safePage * PAGE_SIZE;
+                const pageContent = behaviorFiltered.slice(startIndex, startIndex + PAGE_SIZE);
+
+                setRecords(pageContent);
+                setTotalPages(computedTotalPages);
+                if (safePage !== page) {
+                    setPage(safePage);
+                }
+                return;
+            }
+
+            const res = await attendanceService.getAll({ ...filters, page, size: PAGE_SIZE });
             if (res.success) {
                 setRecords(res.data.content);
                 setTotalPages(res.data.totalPages);
@@ -104,16 +169,21 @@ export default function AttendancePage() {
 
     const applyFilters = () => {
         setPage(0);
-        loadRecords();
+        if (page === 0) {
+            loadRecords();
+        }
     };
 
     const clearFilters = () => {
         setFilterStatus('');
         setFilterStartDate('');
         setFilterEndDate('');
-        setFilterUserId('');
+        setFilterEmployeeId('');
+        setFilterAttendanceBehavior('');
         setPage(0);
-        setTimeout(loadRecords, 0);
+        if (page === 0) {
+            loadRecords();
+        }
     };
 
     const formatTime = (dt: string | null) => {
@@ -216,6 +286,8 @@ export default function AttendancePage() {
         return 'Normal';
     };
 
+    const filteredRecords = records;
+
     if (loading && records.length === 0) return <PageLoader />;
 
     return (
@@ -270,14 +342,28 @@ export default function AttendancePage() {
                             />
                         </div>
                         <div>
-                            <label className="label">User ID</label>
+                            <label className="label">Employee ID</label>
                             <input
-                                type="number"
+                                type="text"
                                 className="input"
-                                value={filterUserId}
-                                onChange={(e) => setFilterUserId(e.target.value)}
-                                placeholder="e.g. 1"
+                                value={filterEmployeeId}
+                                onChange={(e) => setFilterEmployeeId(e.target.value)}
+                                placeholder="e.g. EMP001"
                             />
+                        </div>
+                        <div>
+                            <label className="label">Attendance Behavior</label>
+                            <select
+                                className="select"
+                                value={filterAttendanceBehavior}
+                                onChange={(e) => setFilterAttendanceBehavior(e.target.value as AttendanceBehaviorFilter)}
+                            >
+                                <option value="">All</option>
+                                <option value="LATE_CLOCK_IN">Late Clock In</option>
+                                <option value="EARLY_CLOCK_OUT">Early Clock Out</option>
+                                <option value="OUTSTATION">Outstation</option>
+                                <option value="OUTSIDE_WORKING_AREA">Outside Working Area</option>
+                            </select>
                         </div>
                         <div className="flex gap-2">
                             <button onClick={applyFilters} className="btn-primary btn-sm">
@@ -308,14 +394,14 @@ export default function AttendancePage() {
                         </tr>
                     </thead>
                     <tbody>
-                        {records.length === 0 ? (
+                        {filteredRecords.length === 0 ? (
                             <tr>
                                 <td colSpan={8} className="text-center py-8 text-surface-400">
                                     No attendance records found
                                 </td>
                             </tr>
                         ) : (
-                            records.map((r) => (
+                            filteredRecords.map((r) => (
                                 <React.Fragment key={r.id}>
                                     <tr>
                                         <td className="whitespace-nowrap">{formatDate(r.attendanceDate)}</td>

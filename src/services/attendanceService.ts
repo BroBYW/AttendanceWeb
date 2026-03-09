@@ -8,6 +8,7 @@ import type {
 
 export interface AttendanceFilters {
     userId?: number;
+    employeeId?: string;
     status?: AttendanceStatus;
     startDate?: string;
     endDate?: string;
@@ -19,6 +20,7 @@ export const attendanceService = {
     getAll: async (filters: AttendanceFilters = {}) => {
         const params: Record<string, string | number> = {};
         if (filters.userId) params.userId = filters.userId;
+        if (filters.employeeId) params.employeeId = filters.employeeId;
         if (filters.status) params.status = filters.status;
         if (filters.startDate) params.startDate = filters.startDate;
         if (filters.endDate) params.endDate = filters.endDate;
