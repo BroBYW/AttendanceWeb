@@ -192,7 +192,10 @@ export default function GpsMap({ logs, officeAreas, selectedLogId }: Props) {
         for (const area of officeAreas) {
             if (area.geojsonData) {
                 try {
-                    const parsed = JSON.parse(area.geojsonData) as GeoJSON.FeatureCollection;
+                    const parsed = (typeof area.geojsonData === 'string'
+                        ? JSON.parse(area.geojsonData)
+                        : area.geojsonData) as GeoJSON.FeatureCollection;
+                        
                     layers.push({ id: area.id, name: area.name, data: parsed });
 
                     // Extract polygon rings for point-in-polygon checks
@@ -224,13 +227,11 @@ export default function GpsMap({ logs, officeAreas, selectedLogId }: Props) {
     useEffect(() => {
         // Fetch and parse KML for each office area that has a polygonUrl but no geojsonData
         const fetchKmlPolygons = async () => {
-            const parsedPolygons: { id: number; name: string; coordinates: [number, number][] }[] = [];
-
-            for (const area of officeAreas) {
+            const promises = officeAreas.map(async (area) => {
                 if (area.polygonFileUrl && !area.geojsonData) {
                     try {
                         const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}${area.polygonFileUrl}`);
-                        if (!response.ok) continue;
+                        if (!response.ok) return null;
 
                         const kmlText = await response.text();
 
@@ -260,19 +261,22 @@ export default function GpsMap({ logs, officeAreas, selectedLogId }: Props) {
                             });
 
                             if (coordinates.length > 0) {
-                                parsedPolygons.push({
+                                return {
                                     id: area.id,
                                     name: area.name,
                                     coordinates: coordinates
-                                });
+                                };
                             }
                         }
                     } catch (error) {
                         console.error('Failed to fetch/parse KML for area ' + area.name, error);
                     }
                 }
-            }
-            setKmlPolygons(parsedPolygons);
+                return null;
+            });
+
+            const results = await Promise.all(promises);
+            setKmlPolygons(results.filter((r): r is { id: number; name: string; coordinates: [number, number][] } => r !== null));
         };
 
         fetchKmlPolygons();

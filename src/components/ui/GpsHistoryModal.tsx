@@ -95,7 +95,20 @@ export default function GpsHistoryModal({ open, onClose, userId, userName }: Pro
             ]);
             setLogs(logsData);
             if (areasData.success) {
-                setOfficeAreas(areasData.data.filter((a: OfficeAreaResponse) => a.status === 'ACTIVE'));
+                const activeAreas = areasData.data.filter((a: OfficeAreaResponse) => a.status === 'ACTIVE');
+                setOfficeAreas(activeAreas);
+                // Background-load geojson data for polygon overlays
+                const needsGeojson = activeAreas.some(a => !a.geojsonData);
+                if (needsGeojson) {
+                    officeAreaService.getGeojsonMap().then(geoRes => {
+                        if (geoRes.success && geoRes.data) {
+                            setOfficeAreas(prev => prev.map(area => ({
+                                ...area,
+                                geojsonData: (geoRes.data as any)[area.id] ?? area.geojsonData ?? null,
+                            })));
+                        }
+                    }).catch(() => {});
+                }
             }
         } catch (error) {
             toast.error('Failed to load GPS history or areas');
@@ -110,7 +123,10 @@ export default function GpsHistoryModal({ open, onClose, userId, userName }: Pro
         for (const area of officeAreas) {
             if (area.geojsonData) {
                 try {
-                    const parsed = JSON.parse(area.geojsonData) as GeoJSON.FeatureCollection;
+                    const parsed = (typeof area.geojsonData === 'string' 
+                        ? JSON.parse(area.geojsonData) 
+                        : area.geojsonData) as GeoJSON.FeatureCollection;
+                        
                     if (parsed.features) {
                         for (const feature of parsed.features) {
                             const props = feature.properties || {};
@@ -138,12 +154,11 @@ export default function GpsHistoryModal({ open, onClose, userId, userName }: Pro
     const [kmlPolygons, setKmlPolygons] = useState<{ name: string; coordinates: [number, number][] }[]>([]);
     useEffect(() => {
         const fetchKml = async () => {
-            const result: { name: string; coordinates: [number, number][] }[] = [];
-            for (const area of officeAreas) {
+            const promises = officeAreas.map(async (area) => {
                 if (area.polygonFileUrl && !area.geojsonData) {
                     try {
                         const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}${area.polygonFileUrl}`);
-                        if (!res.ok) continue;
+                        if (!res.ok) return null;
                         const kmlText = await res.text();
                         const parser = new DOMParser();
                         const xmlDoc = parser.parseFromString(kmlText, 'text/xml');
@@ -158,12 +173,15 @@ export default function GpsHistoryModal({ open, onClose, userId, userName }: Pro
                                     if (!isNaN(lat) && !isNaN(lng)) coords.push([lat, lng]);
                                 }
                             }
-                            if (coords.length > 0) result.push({ name: area.name, coordinates: coords });
+                            if (coords.length > 0) return { name: area.name, coordinates: coords };
                         }
                     } catch { /* skip */ }
                 }
-            }
-            setKmlPolygons(result);
+                return null;
+            });
+            
+            const results = await Promise.all(promises);
+            setKmlPolygons(results.filter((r): r is { name: string; coordinates: [number, number][] } => r !== null));
         };
         fetchKml();
     }, [officeAreas]);

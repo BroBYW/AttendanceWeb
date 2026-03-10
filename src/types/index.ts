@@ -41,7 +41,7 @@ export interface OfficeAreaResponse {
     radiusMeters: number | null;
     polygonFilePath: string | null;
     polygonFileUrl: string | null;
-    geojsonData: string | null;
+    geojsonData: string | object | null;
     status: OfficeAreaStatus;
     createdAt: string;
 }

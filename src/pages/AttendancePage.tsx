@@ -77,7 +77,17 @@ export default function AttendancePage() {
         try {
             const res = await officeAreaService.getAll();
             if (res.success) {
-                setOfficeAreas(res.data.filter(area => area.status === 'ACTIVE'));
+                const activeAreas = res.data.filter(area => area.status === 'ACTIVE');
+                setOfficeAreas(activeAreas);
+                // Background-load geojson data for polygon checks
+                officeAreaService.getGeojsonMap().then(geoRes => {
+                    if (geoRes.success && geoRes.data) {
+                        setOfficeAreas(prev => prev.map(area => ({
+                            ...area,
+                            geojsonData: geoRes.data[area.id] ?? area.geojsonData ?? null,
+                        })));
+                    }
+                }).catch(() => { /* non-critical */ });
             }
         } catch (error) {
             console.error('Failed to load office areas', error);
@@ -188,15 +198,46 @@ export default function AttendancePage() {
 
     const formatTime = (dt: string | null) => {
         if (!dt) return '—';
-        return new Date(dt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+
+        const timeOnlyMatch = dt.match(/^(\d{2}):(\d{2})(?::(\d{2}))?$/);
+        if (timeOnlyMatch) {
+            const hour24 = Number(timeOnlyMatch[1]);
+            const minute = timeOnlyMatch[2];
+            const hour12 = ((hour24 % 12) || 12).toString().padStart(2, '0');
+            const suffix = hour24 >= 12 ? 'PM' : 'AM';
+            return `${hour12}:${minute} ${suffix}`;
+        }
+
+        const normalized = dt.includes(' ') && !dt.includes('T') ? dt.replace(' ', 'T') : dt;
+        const isoNoTzMatch = normalized.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/);
+        const hasTimezone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(normalized);
+
+        if (isoNoTzMatch && !hasTimezone) {
+            const year = Number(isoNoTzMatch[1]);
+            const month = Number(isoNoTzMatch[2]) - 1;
+            const day = Number(isoNoTzMatch[3]);
+            const hour = Number(isoNoTzMatch[4]);
+            const minute = Number(isoNoTzMatch[5]);
+            const second = isoNoTzMatch[6] ? Number(isoNoTzMatch[6]) : 0;
+            return new Date(year, month, day, hour, minute, second).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        }
+
+        const parsed = new Date(normalized);
+        if (Number.isNaN(parsed.getTime())) return dt;
+        return parsed.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
     };
 
     const formatDate = (d: string) => {
-        return new Date(d).toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric',
-        });
+        const dateOnlyMatch = d.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (dateOnlyMatch) {
+            const year = Number(dateOnlyMatch[1]);
+            const month = Number(dateOnlyMatch[2]) - 1;
+            const day = Number(dateOnlyMatch[3]);
+            return new Date(year, month, day).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+        }
+        const parsed = new Date(d);
+        if (Number.isNaN(parsed.getTime())) return d;
+        return parsed.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
     };
 
     /** Ray-casting point-in-polygon test. ring is [lng, lat] pairs (GeoJSON order). */
@@ -218,7 +259,9 @@ export default function AttendancePage() {
         for (const area of officeAreas) {
             if (!area.geojsonData) continue;
             try {
-                const parsed = JSON.parse(area.geojsonData);
+                const parsed: any = typeof area.geojsonData === 'string'
+                    ? JSON.parse(area.geojsonData)
+                    : area.geojsonData;
                 if (!parsed.features) continue;
                 for (const feature of parsed.features) {
                     const geom = feature.geometry;
@@ -260,7 +303,7 @@ export default function AttendancePage() {
                 }
             }
 
-            return { 
+            return {
                 status: insideAnyArea ? 'Outstation' : 'Outside Working Area',
                 areaName: insideAnyArea ? matchedAreaName : undefined
             };
@@ -444,7 +487,7 @@ export default function AttendancePage() {
                                                         lat: r.clockInLat!,
                                                         lng: r.clockInLng!,
                                                         title: `Clock In Location: ${r.userName}`,
-                                                        time: r.clockInTime ? new Date(r.clockInTime).toLocaleTimeString() : null,
+                                                        time: r.clockInTime ? formatTime(r.clockInTime) : null,
                                                         status: r.clockInType || 'UNKNOWN',
                                                         locationStatus: getClockInLocationStatus(r).status
                                                     })}
@@ -482,7 +525,7 @@ export default function AttendancePage() {
                                                         lat: r.clockOutLat!,
                                                         lng: r.clockOutLng!,
                                                         title: `Clock Out Location: ${r.userName}`,
-                                                        time: r.clockOutTime ? new Date(r.clockOutTime).toLocaleTimeString() : null,
+                                                        time: r.clockOutTime ? formatTime(r.clockOutTime) : null,
                                                         status: r.clockOutType || 'UNKNOWN',
                                                         locationStatus: getClockOutLocationStatus(r).status
                                                     })}

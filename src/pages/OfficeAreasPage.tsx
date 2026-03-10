@@ -39,7 +39,18 @@ export default function OfficeAreasPage() {
     const loadAreas = async () => {
         try {
             const res = await officeAreaService.getAll();
-            if (res.success) setAreas(res.data);
+            if (res.success) {
+                setAreas(res.data);
+                // Background-load geojson data (not blocking page render)
+                officeAreaService.getGeojsonMap().then(geoRes => {
+                    if (geoRes.success && geoRes.data) {
+                        setAreas(prev => prev.map(area => ({
+                            ...area,
+                            geojsonData: geoRes.data[area.id] ?? area.geojsonData ?? null,
+                        })));
+                    }
+                }).catch(() => { /* geojson load failure is non-critical */ });
+            }
         } catch {
             toast.error('Failed to load office areas');
         } finally {
@@ -54,21 +65,26 @@ export default function OfficeAreasPage() {
     };
 
     const openEdit = async (area: OfficeAreaResponse) => {
-        setEditArea(area);
+        // Look up latest data from state (geojsonData may have loaded in background)
+        const latest = areas.find(a => a.id === area.id) || area;
+        setEditArea(latest);
         setForm({
-            name: area.name,
-            latitude: area.latitude,
-            longitude: area.longitude,
-            radiusMeters: area.radiusMeters || 100,
-            status: area.status,
+            name: latest.name,
+            latitude: latest.latitude,
+            longitude: latest.longitude,
+            radiusMeters: latest.radiusMeters || 100,
+            status: latest.status,
         });
         setPolygonCoordinates('');
 
         // Use stored GeoJSON to extract coordinates for editing
-        if (area.geojsonData) {
+        if (latest.geojsonData) {
             try {
-                const parsed = JSON.parse(area.geojsonData);
-                const coords = parsed?.features?.[0]?.geometry?.coordinates?.[0];
+                const parsed: any = typeof latest.geojsonData === 'string' 
+                    ? JSON.parse(latest.geojsonData) 
+                    : latest.geojsonData;
+                const feature: any = parsed?.features?.[0];
+                const coords = feature?.geometry?.coordinates?.[0];
                 if (coords && Array.isArray(coords)) {
                     const coordStr = coords.map((c: number[]) => `${c[0]},${c[1]}`).join(' ');
                     setPolygonCoordinates(coordStr);
@@ -76,12 +92,12 @@ export default function OfficeAreasPage() {
             } catch (err) {
                 console.error('Failed to parse stored GeoJSON for editing', err);
             }
-        } else if (area.polygonFileUrl) {
+        } else if (latest.polygonFileUrl) {
             // Legacy fallback: fetch and parse KML file
             try {
-                const kmlUrl = area.polygonFileUrl.startsWith('http')
-                    ? area.polygonFileUrl
-                    : `${import.meta.env.VITE_API_BASE_URL || '${import.meta.env.VITE_API_BASE_URL}'}${area.polygonFileUrl.startsWith('/') ? '' : '/'}${area.polygonFileUrl}`;
+                const kmlUrl = latest.polygonFileUrl.startsWith('http')
+                    ? latest.polygonFileUrl
+                    : `${import.meta.env.VITE_API_BASE_URL || '${import.meta.env.VITE_API_BASE_URL}'}${latest.polygonFileUrl.startsWith('/') ? '' : '/'}${latest.polygonFileUrl}`;
 
                 const response = await fetch(kmlUrl);
                 const kmlText = await response.text();
@@ -588,17 +604,19 @@ export default function OfficeAreasPage() {
                 title={`Coverage Area: ${mapTarget?.name}`}
                 maxWidth="max-w-6xl"
             >
-                {mapTarget && (
-                    <div className="h-[70vh]">
-                        <CoverageMap
-                            latitude={mapTarget.latitude}
-                            longitude={mapTarget.longitude}
-                            radiusMeters={mapTarget.radiusMeters || undefined}
-                            polygonFileUrl={mapTarget.polygonFileUrl}
-                            geojsonData={mapTarget.geojsonData}
-                        />
-                    </div>
-                )}
+                {mapTarget && (() => {
+                    const liveArea = areas.find(a => a.id === mapTarget.id) || mapTarget;
+                    return (
+                        <div className="h-[70vh]">
+                            <CoverageMap
+                                latitude={liveArea.latitude}
+                                longitude={liveArea.longitude}
+                                radiusMeters={liveArea.radiusMeters || undefined}
+                                geojsonData={liveArea.geojsonData}
+                            />
+                        </div>
+                    );
+                })()}
             </Modal>
         </div>
     );

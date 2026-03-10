@@ -40,6 +40,8 @@ export const officeAreaService = {
             formData,
             { headers: { 'Content-Type': 'multipart/form-data' } },
         );
+        // Invalidate geojson cache since polygon data changed
+        sessionStorage.removeItem('geojson-map-cache');
         return res.data;
     },
 
@@ -52,6 +54,45 @@ export const officeAreaService = {
             formData,
             { headers: { 'Content-Type': 'multipart/form-data' } },
         );
+        // Invalidate geojson cache since new polygons were imported
+        sessionStorage.removeItem('geojson-map-cache');
         return res.data;
+    },
+
+    /**
+     * Fetch geojsonData for all areas as a map of id → geojsonData object.
+     * Cached in sessionStorage for 10 minutes.
+     */
+    getGeojsonMap: async () => {
+        const CACHE_KEY = 'geojson-map-cache';
+        const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+        try {
+            const cached = sessionStorage.getItem(CACHE_KEY);
+            if (cached) {
+                const { data, timestamp } = JSON.parse(cached);
+                if (Date.now() - timestamp < CACHE_TTL_MS) {
+                    return { success: true, message: 'cached', data } as ApiResponse<Record<number, object>>;
+                }
+            }
+        } catch { /* ignore parse errors */ }
+
+        const res = await api.get<ApiResponse<Record<number, object>>>('/api/admin/office-areas/geojson-map');
+
+        if (res.data.success && res.data.data) {
+            try {
+                sessionStorage.setItem(CACHE_KEY, JSON.stringify({
+                    data: res.data.data,
+                    timestamp: Date.now(),
+                }));
+            } catch { /* sessionStorage full — still return the data */ }
+        }
+
+        return res.data;
+    },
+
+    /** Force clear the geojson cache (call after polygon changes) */
+    invalidateGeojsonCache: () => {
+        sessionStorage.removeItem('geojson-map-cache');
     },
 };

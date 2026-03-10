@@ -112,7 +112,10 @@ export default function SinglePointMapModal({ open, onClose, latitude, longitude
         for (const area of officeAreas) {
             if (area.geojsonData) {
                 try {
-                    const parsed = JSON.parse(area.geojsonData) as GeoJSON.FeatureCollection;
+                    const parsed = (typeof area.geojsonData === 'string'
+                        ? JSON.parse(area.geojsonData)
+                        : area.geojsonData) as GeoJSON.FeatureCollection;
+                        
                     layers.push({ id: area.id, name: area.name, data: parsed });
                 } catch (err) {
                     console.error('Failed to parse GeoJSON for area ' + area.name, err);
@@ -158,13 +161,11 @@ export default function SinglePointMapModal({ open, onClose, latitude, longitude
         if (!open || officeAreas.length === 0) return;
 
         const fetchKmlPolygons = async () => {
-            const parsedPolygons: { id: number; name: string; coordinates: [number, number][] }[] = [];
-
-            for (const area of officeAreas) {
+            const promises = officeAreas.map(async (area) => {
                 if (area.polygonFileUrl && !area.geojsonData) {
                     try {
                         const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}${area.polygonFileUrl}`);
-                        if (!response.ok) continue;
+                        if (!response.ok) return null;
 
                         const kmlText = await response.text();
                         const parser = new DOMParser();
@@ -187,19 +188,22 @@ export default function SinglePointMapModal({ open, onClose, latitude, longitude
                             });
 
                             if (coordinates.length > 0) {
-                                parsedPolygons.push({
+                                return {
                                     id: area.id,
                                     name: area.name,
                                     coordinates: coordinates
-                                });
+                                };
                             }
                         }
                     } catch (error) {
                         console.error('Failed to fetch/parse KML for area ' + area.name, error);
                     }
                 }
-            }
-            setKmlPolygons(parsedPolygons);
+                return null;
+            });
+
+            const results = await Promise.all(promises);
+            setKmlPolygons(results.filter((r): r is { id: number; name: string; coordinates: [number, number][] } => r !== null));
         };
 
         fetchKmlPolygons();

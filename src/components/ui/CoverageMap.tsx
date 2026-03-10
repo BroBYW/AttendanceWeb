@@ -54,14 +54,14 @@ interface CoverageMapProps {
     longitude: number;
     radiusMeters?: number;
     polygonFileUrl?: string | null;
-    geojsonData?: string | null;
+    geojsonData?: string | object | null;
 }
 
 /**
  * Renders a polygon from stored GeoJSON data (preferred)
  * or falls back to KML file URL via omnivore.
  */
-function PolygonLayer({ geojsonData, polygonFileUrl }: { geojsonData?: string | null; polygonFileUrl?: string | null }) {
+function PolygonLayer({ geojsonData, polygonFileUrl }: { geojsonData?: string | object | null; polygonFileUrl?: string | null }) {
     const map = useMap();
     const layerRef = useRef<L.GeoJSON | null>(null);
 
@@ -75,7 +75,7 @@ function PolygonLayer({ geojsonData, polygonFileUrl }: { geojsonData?: string | 
         // Priority 1: Use stored GeoJSON data (parsed directly, no network request)
         if (geojsonData) {
             try {
-                const parsed = JSON.parse(geojsonData);
+                const parsed = typeof geojsonData === 'string' ? JSON.parse(geojsonData) : geojsonData;
                 const layer = L.geoJSON(parsed, {
                     style: (feature) => getBlockStyle(feature as GeoJSON.Feature),
                     onEachFeature: (feature, layer) => {
@@ -162,20 +162,39 @@ function PolygonLayer({ geojsonData, polygonFileUrl }: { geojsonData?: string | 
             }
         }
 
-        // Priority 2: Fallback to loading from URL via omnivore (legacy KML support)
+        // Priority 2: Fallback to loading from URL (legacy support)
         if (polygonFileUrl) {
             const url = polygonFileUrl.startsWith('http')
                 ? polygonFileUrl
                 : `${import.meta.env.VITE_API_BASE_URL || '${import.meta.env.VITE_API_BASE_URL}'}${polygonFileUrl.startsWith('/') ? '' : '/'}${polygonFileUrl}`;
 
-            const customLayer = L.geoJSON(null, { style: () => defaultPolygonStyle });
-            const runLayer = omnivore.kml(url, null, customLayer)
-                .on('ready', function () {
-                    map.fitBounds(runLayer.getBounds());
-                })
-                .addTo(map);
+            const lowerUrl = url.toLowerCase();
 
-            layerRef.current = runLayer;
+            if (lowerUrl.endsWith('.geojson') || lowerUrl.endsWith('.json')) {
+                // GeoJSON file: fetch and parse directly (NOT via omnivore KML parser)
+                fetch(url)
+                    .then(res => {
+                        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                        return res.json();
+                    })
+                    .then(parsed => {
+                        const layer = L.geoJSON(parsed, {
+                            style: (feature) => getBlockStyle(feature as GeoJSON.Feature),
+                        }).addTo(map);
+                        map.fitBounds(layer.getBounds());
+                        layerRef.current = layer;
+                    })
+                    .catch(err => console.error('Failed to load GeoJSON file:', err));
+            } else {
+                // KML file: use omnivore
+                const customLayer = L.geoJSON(null, { style: () => defaultPolygonStyle });
+                const runLayer = omnivore.kml(url, null, customLayer)
+                    .on('ready', function () {
+                        map.fitBounds(runLayer.getBounds());
+                    })
+                    .addTo(map);
+                layerRef.current = runLayer;
+            }
         }
 
         return () => {
