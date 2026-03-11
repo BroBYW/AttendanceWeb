@@ -22,9 +22,13 @@ export default function ApprovalPage() {
         const base = API_BASE.replace(/\/+$/, '').replace(/\/api$/i, '');
         const normalizedPath = path.replace(/\\/g, '/');
         const withoutLeadingSlash = normalizedPath.replace(/^\/+/, '');
-        const withUploadsPrefix = /^(selfies|documents|polygons)\//i.test(withoutLeadingSlash)
-            ? `uploads/${withoutLeadingSlash}`
+        const uploadsIndex = withoutLeadingSlash.indexOf('uploads/');
+        const pathFromUploads = uploadsIndex >= 0
+            ? withoutLeadingSlash.slice(uploadsIndex)
             : withoutLeadingSlash;
+        const withUploadsPrefix = /^(selfies|documents|polygons)\//i.test(pathFromUploads)
+            ? `uploads/${pathFromUploads}`
+            : pathFromUploads;
         const cleaned = `/${withUploadsPrefix}`;
         return `${base}${cleaned}`;
     };
