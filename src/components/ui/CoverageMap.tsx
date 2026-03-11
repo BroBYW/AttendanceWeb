@@ -1,11 +1,9 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Circle, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import LoadingSpinner from './LoadingSpinner';
 
-// leaflet-omnivore doesn't have reliable TypeScript types, so we use require
-// @ts-expect-error leaflet-omnivore does not have typescript definitions
-import omnivore from 'leaflet-omnivore';
 
 // Fix for default marker icons in Leaflet when using Webpack/Vite
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -55,22 +53,33 @@ interface CoverageMapProps {
     radiusMeters?: number;
     polygonFileUrl?: string | null;
     geojsonData?: string | object | null;
+    expectPolygon?: boolean;
 }
 
 /**
  * Renders a polygon from stored GeoJSON data (preferred)
  * or falls back to KML file URL via omnivore.
  */
-function PolygonLayer({ geojsonData, polygonFileUrl }: { geojsonData?: string | object | null; polygonFileUrl?: string | null }) {
+function PolygonLayer({
+    geojsonData,
+    polygonFileUrl,
+    onPolygonDrawn
+}: {
+    geojsonData?: string | object | null;
+    polygonFileUrl?: string | null;
+    onPolygonDrawn: (drawn: boolean) => void;
+}) {
     const map = useMap();
     const layerRef = useRef<L.GeoJSON | null>(null);
 
     useEffect(() => {
+        let cancelled = false;
         // Clean up previous layer
         if (layerRef.current) {
             map.removeLayer(layerRef.current);
             layerRef.current = null;
         }
+        onPolygonDrawn(false);
 
         // Priority 1: Use stored GeoJSON data (parsed directly, no network request)
         if (geojsonData) {
@@ -156,6 +165,7 @@ function PolygonLayer({ geojsonData, polygonFileUrl }: { geojsonData?: string | 
                 }).addTo(map);
                 map.fitBounds(layer.getBounds());
                 layerRef.current = layer;
+                onPolygonDrawn(true);
                 return;
             } catch (err) {
                 console.error('Failed to parse stored GeoJSON, falling back to file URL:', err);
@@ -178,50 +188,98 @@ function PolygonLayer({ geojsonData, polygonFileUrl }: { geojsonData?: string | 
                         return res.json();
                     })
                     .then(parsed => {
+                        if (cancelled) return;
                         const layer = L.geoJSON(parsed, {
                             style: (feature) => getBlockStyle(feature as GeoJSON.Feature),
                         }).addTo(map);
                         map.fitBounds(layer.getBounds());
                         layerRef.current = layer;
+                        onPolygonDrawn(true);
                     })
-                    .catch(err => console.error('Failed to load GeoJSON file:', err));
+                    .catch(err => {
+                        if (!cancelled) onPolygonDrawn(false);
+                        console.error('Failed to load GeoJSON file:', err);
+                    });
             } else {
-                // KML file: use omnivore
-                const customLayer = L.geoJSON(null, { style: () => defaultPolygonStyle });
-                const runLayer = omnivore.kml(url, null, customLayer)
-                    .on('ready', function () {
-                        map.fitBounds(runLayer.getBounds());
+                fetch(url)
+                    .then(res => {
+                        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                        return res.text();
                     })
-                    .addTo(map);
-                layerRef.current = runLayer;
+                    .then(kmlText => {
+                        if (cancelled) return;
+                        const parser = new DOMParser();
+                        const xmlDoc = parser.parseFromString(kmlText, 'text/xml');
+                        const coordsNode = xmlDoc.getElementsByTagName('coordinates')[0];
+                        if (!coordsNode?.textContent) {
+                            onPolygonDrawn(false);
+                            return;
+                        }
+
+                        const points: [number, number][] = [];
+                        for (const point of coordsNode.textContent.trim().split(/\s+/)) {
+                            const parts = point.split(',');
+                            if (parts.length >= 2) {
+                                const lng = parseFloat(parts[0]);
+                                const lat = parseFloat(parts[1]);
+                                if (!isNaN(lat) && !isNaN(lng)) {
+                                    points.push([lat, lng]);
+                                }
+                            }
+                        }
+
+                        if (points.length > 0) {
+                            const polygonLayer = L.polygon(points, {
+                                color: defaultPolygonStyle.color,
+                                weight: defaultPolygonStyle.weight,
+                                opacity: defaultPolygonStyle.opacity,
+                                fillColor: defaultPolygonStyle.fillColor,
+                                fillOpacity: defaultPolygonStyle.fillOpacity,
+                            }).addTo(map);
+                            map.fitBounds(polygonLayer.getBounds());
+                            layerRef.current = polygonLayer as unknown as L.GeoJSON;
+                            onPolygonDrawn(true);
+                            return;
+                        }
+                        onPolygonDrawn(false);
+                    })
+                    .catch(err => {
+                        if (!cancelled) onPolygonDrawn(false);
+                        console.error('Failed to load KML file:', err);
+                    });
             }
         }
 
         return () => {
+            cancelled = true;
             if (layerRef.current) {
                 map.removeLayer(layerRef.current);
             }
         };
-    }, [geojsonData, polygonFileUrl, map]);
+    }, [geojsonData, polygonFileUrl, map, onPolygonDrawn]);
 
     return null;
 }
 
-export default function CoverageMap({ latitude, longitude, radiusMeters, polygonFileUrl, geojsonData }: CoverageMapProps) {
+export default function CoverageMap({ latitude, longitude, radiusMeters, polygonFileUrl, geojsonData, expectPolygon = false }: CoverageMapProps) {
+    const [mapReady, setMapReady] = useState(false);
+    const [polygonDrawn, setPolygonDrawn] = useState(false);
     const center: [number, number] = [
         latitude !== undefined && latitude !== null ? latitude : 0,
         longitude !== undefined && longitude !== null ? longitude : 0
     ];
 
     const hasPolygon = !!geojsonData || !!polygonFileUrl;
+    const waitingForPolygon = expectPolygon || hasPolygon;
 
     return (
-        <div className="w-full h-full min-h-[400px] rounded-xl overflow-hidden border border-surface-200">
+        <div className="w-full h-full min-h-[400px] rounded-xl overflow-hidden border border-surface-200 relative">
             <MapContainer
                 center={center}
                 zoom={15}
                 scrollWheelZoom={true}
                 className="w-full h-full min-h-[400px]"
+                whenReady={() => setMapReady(true)}
             >
                 <TileLayer
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -230,7 +288,11 @@ export default function CoverageMap({ latitude, longitude, radiusMeters, polygon
 
                 {/* Render polygon from GeoJSON data or KML file */}
                 {hasPolygon && (
-                    <PolygonLayer geojsonData={geojsonData} polygonFileUrl={polygonFileUrl} />
+                    <PolygonLayer
+                        geojsonData={geojsonData}
+                        polygonFileUrl={polygonFileUrl}
+                        onPolygonDrawn={setPolygonDrawn}
+                    />
                 )}
 
                 {/* If NO polygon, but we have radius and coordinates, render a Circle */}
@@ -256,6 +318,14 @@ export default function CoverageMap({ latitude, longitude, radiusMeters, polygon
                     />
                 )}
             </MapContainer>
+            {(!mapReady || (waitingForPolygon && !polygonDrawn)) && (
+                <div className="absolute inset-0 bg-white/70 backdrop-blur-[1px] flex items-center justify-center z-[1000]">
+                    <div className="flex items-center gap-2 rounded-md bg-white border border-surface-200 px-3 py-2 shadow-sm">
+                        <LoadingSpinner size={18} />
+                        <span className="text-sm text-surface-700 font-medium">{mapReady ? 'Loading polygon...' : 'Loading map...'}</span>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

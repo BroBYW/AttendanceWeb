@@ -612,7 +612,9 @@ export default function OfficeAreasPage() {
                                 latitude={liveArea.latitude}
                                 longitude={liveArea.longitude}
                                 radiusMeters={liveArea.radiusMeters || undefined}
+                                polygonFileUrl={liveArea.polygonFileUrl}
                                 geojsonData={liveArea.geojsonData}
+                                expectPolygon={true}
                             />
                         </div>
                     );

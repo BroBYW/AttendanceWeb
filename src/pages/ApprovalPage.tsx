@@ -26,6 +26,7 @@ export default function ApprovalPage() {
 
     const [records, setRecords] = useState<AttendanceResponse[]>([]);
     const [officeAreas, setOfficeAreas] = useState<OfficeAreaResponse[]>([]);
+    const [locationStatusLoading, setLocationStatusLoading] = useState(true);
     // Map of userId -> assignedOfficeAreaIds for user-aware location status
     const [userAssignments, setUserAssignments] = useState<Record<number, number[]>>({});
     const [loading, setLoading] = useState(true);
@@ -80,11 +81,17 @@ export default function ApprovalPage() {
 
     const loadOfficeAreas = async () => {
         try {
+            setLocationStatusLoading(true);
             const res = await officeAreaService.getAll();
             if (res.success) {
                 const activeAreas = res.data.filter(area => area.status === 'ACTIVE');
                 setOfficeAreas(activeAreas);
                 // Background-load geojson data for polygon checks
+                const needsGeojson = activeAreas.some(a => !a.geojsonData);
+                if (!needsGeojson) {
+                    setLocationStatusLoading(false);
+                    return;
+                }
                 officeAreaService.getGeojsonMap().then(geoRes => {
                     if (geoRes.success && geoRes.data) {
                         setOfficeAreas(prev => prev.map(area => ({
@@ -92,10 +99,15 @@ export default function ApprovalPage() {
                             geojsonData: geoRes.data[area.id] ?? area.geojsonData ?? null,
                         })));
                     }
-                }).catch(() => { /* non-critical */ });
+                }).catch(() => { }).finally(() => {
+                    setLocationStatusLoading(false);
+                });
+            } else {
+                setLocationStatusLoading(false);
             }
         } catch (error) {
             console.error('Failed to load office areas', error);
+            setLocationStatusLoading(false);
         }
     };
 
@@ -289,6 +301,18 @@ export default function ApprovalPage() {
         return { status: 'Normal', areaName: r.officeAreaName || undefined };
     };
 
+    const shouldWaitPolygon = locationStatusLoading && officeAreas.length > 0 && polygonRingsWithArea.length === 0;
+
+    const getClockInStatusForUi = (r: AttendanceResponse): { status: LocationStatusType, areaName?: string } | null => {
+        if (shouldWaitPolygon && r.clockInLat != null && r.clockInLng != null) return null;
+        return getClockInLocationStatus(r);
+    };
+
+    const getClockOutStatusForUi = (r: AttendanceResponse): { status: LocationStatusType, areaName?: string } | null => {
+        if (shouldWaitPolygon && r.clockOutLat != null && r.clockOutLng != null) return null;
+        return getClockOutLocationStatus(r);
+    };
+
     if (loading && records.length === 0) return <PageLoader />;
 
     return (
@@ -342,18 +366,20 @@ export default function ApprovalPage() {
                                         Clock-in: {formatTime(r.clockInTime)}
                                         <div className="flex flex-col items-center">
                                             <span
-                                                className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${getClockInLocationStatus(r).status === 'Normal'
+                                                className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${!getClockInStatusForUi(r)
+                                                    ? 'bg-surface-100 text-surface-500'
+                                                    : getClockInStatusForUi(r)?.status === 'Normal'
                                                     ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20'
-                                                    : getClockInLocationStatus(r).status === 'Outstation'
+                                                    : getClockInStatusForUi(r)?.status === 'Outstation'
                                                         ? 'bg-primary-100 text-primary-700'
                                                         : 'bg-amber-100 text-amber-700'
                                                     }`}
                                             >
-                                                {getClockInLocationStatus(r).status}
+                                                {getClockInStatusForUi(r)?.status || 'Loading...'}
                                             </span>
-                                            {getClockInLocationStatus(r).areaName && (
+                                            {getClockInStatusForUi(r)?.areaName && (
                                                 <span className="text-[10px] text-surface-500">
-                                                    ({getClockInLocationStatus(r).areaName})
+                                                    ({getClockInStatusForUi(r)?.areaName})
                                                 </span>
                                             )}
                                         </div>
@@ -365,7 +391,7 @@ export default function ApprovalPage() {
                                                     title: `Clock In Location: ${r.userName}`,
                                                     time: r.clockInTime ? formatTime(r.clockInTime) : null,
                                                     status: r.clockInType || 'UNKNOWN',
-                                                    locationStatus: getClockInLocationStatus(r).status
+                                                    locationStatus: getClockInStatusForUi(r)?.status || null
                                                 })}
                                                 className="text-primary-600 hover:text-primary-800 hover:underline inline-flex items-center"
                                                 title="View Map"
@@ -380,18 +406,20 @@ export default function ApprovalPage() {
                                         {r.clockOutTime && (
                                             <div className="flex flex-col items-center">
                                                 <span
-                                                    className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${getClockOutLocationStatus(r).status === 'Normal'
+                                                    className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${!getClockOutStatusForUi(r)
+                                                        ? 'bg-surface-100 text-surface-500'
+                                                        : getClockOutStatusForUi(r)?.status === 'Normal'
                                                         ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20'
-                                                        : getClockOutLocationStatus(r).status === 'Outstation'
+                                                        : getClockOutStatusForUi(r)?.status === 'Outstation'
                                                             ? 'bg-primary-100 text-primary-700'
                                                             : 'bg-amber-100 text-amber-700'
                                                         }`}
                                                 >
-                                                    {getClockOutLocationStatus(r).status}
+                                                    {getClockOutStatusForUi(r)?.status || 'Loading...'}
                                                 </span>
-                                                {getClockOutLocationStatus(r).areaName && (
+                                                {getClockOutStatusForUi(r)?.areaName && (
                                                     <span className="text-[10px] text-surface-500">
-                                                        ({getClockOutLocationStatus(r).areaName})
+                                                        ({getClockOutStatusForUi(r)?.areaName})
                                                     </span>
                                                 )}
                                             </div>
@@ -404,7 +432,7 @@ export default function ApprovalPage() {
                                                     title: `Clock Out Location: ${r.userName}`,
                                                     time: r.clockOutTime ? formatTime(r.clockOutTime) : null,
                                                     status: r.clockOutType || 'UNKNOWN',
-                                                    locationStatus: getClockOutLocationStatus(r).status
+                                                    locationStatus: getClockOutStatusForUi(r)?.status || null
                                                 })}
                                                 className="text-primary-600 hover:text-primary-800 hover:underline inline-flex items-center"
                                                 title="View Map"
@@ -516,18 +544,20 @@ export default function ApprovalPage() {
                                     <span className="text-surface-400">Location Status</span>
                                     <div className="mt-1 flex flex-col">
                                         <span
-                                            className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium w-fit ${getClockInLocationStatus(detailRecord).status === 'Normal'
+                                            className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium w-fit ${!getClockInStatusForUi(detailRecord)
+                                                ? 'bg-surface-100 text-surface-500'
+                                                : getClockInStatusForUi(detailRecord)?.status === 'Normal'
                                                 ? 'bg-success-100 text-success-700'
-                                                : getClockInLocationStatus(detailRecord).status === 'Outstation'
+                                                : getClockInStatusForUi(detailRecord)?.status === 'Outstation'
                                                     ? 'bg-primary-100 text-primary-700'
                                                     : 'bg-amber-100 text-amber-700'
                                                 }`}
                                         >
-                                            {getClockInLocationStatus(detailRecord).status}
+                                            {getClockInStatusForUi(detailRecord)?.status || 'Loading...'}
                                         </span>
-                                        {getClockInLocationStatus(detailRecord).areaName && (
+                                        {getClockInStatusForUi(detailRecord)?.areaName && (
                                             <span className="text-[10px] text-surface-500 mt-0.5">
-                                                ({getClockInLocationStatus(detailRecord).areaName})
+                                                ({getClockInStatusForUi(detailRecord)?.areaName})
                                             </span>
                                         )}
                                     </div>
@@ -573,18 +603,20 @@ export default function ApprovalPage() {
                                         <span className="text-surface-400">Location Status</span>
                                         <div className="mt-1 flex flex-col">
                                             <span
-                                                className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium w-fit ${getClockOutLocationStatus(detailRecord).status === 'Normal'
+                                                className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium w-fit ${!getClockOutStatusForUi(detailRecord)
+                                                    ? 'bg-surface-100 text-surface-500'
+                                                    : getClockOutStatusForUi(detailRecord)?.status === 'Normal'
                                                     ? 'bg-success-100 text-success-700'
-                                                    : getClockOutLocationStatus(detailRecord).status === 'Outstation'
+                                                    : getClockOutStatusForUi(detailRecord)?.status === 'Outstation'
                                                         ? 'bg-primary-100 text-primary-700'
                                                         : 'bg-amber-100 text-amber-700'
                                                     }`}
                                             >
-                                                {getClockOutLocationStatus(detailRecord).status}
+                                                {getClockOutStatusForUi(detailRecord)?.status || 'Loading...'}
                                             </span>
-                                            {getClockOutLocationStatus(detailRecord).areaName && (
+                                            {getClockOutStatusForUi(detailRecord)?.areaName && (
                                                 <span className="text-[10px] text-surface-500 mt-0.5">
-                                                    ({getClockOutLocationStatus(detailRecord).areaName})
+                                                    ({getClockOutStatusForUi(detailRecord)?.areaName})
                                                 </span>
                                             )}
                                         </div>
