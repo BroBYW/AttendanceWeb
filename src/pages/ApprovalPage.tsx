@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
-import { Check, X, Eye, FileText, AlertTriangle, Map } from 'lucide-react';
+import { Check, X, Eye, FileText, AlertTriangle, Map, Camera } from 'lucide-react';
 import { attendanceService } from '../services/attendanceService';
 import { officeAreaService } from '../services/officeAreaService';
 import { userService } from '../services/userService';
@@ -39,6 +39,7 @@ export default function ApprovalPage() {
     const [processing, setProcessing] = useState(false);
     const [rejectComment, setRejectComment] = useState('');
     const [gpsHistoryUser, setGpsHistoryUser] = useState<{ id: number; name: string } | null>(null);
+    const [viewMediaUrl, setViewMediaUrl] = useState<string | null>(null);
     const [mapModalData, setMapModalData] = useState<{
         lat: number;
         lng: number;
@@ -369,10 +370,10 @@ export default function ApprovalPage() {
                                                 className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${!getClockInStatusForUi(r)
                                                     ? 'bg-surface-100 text-surface-500'
                                                     : getClockInStatusForUi(r)?.status === 'Normal'
-                                                    ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20'
-                                                    : getClockInStatusForUi(r)?.status === 'Outstation'
-                                                        ? 'bg-primary-100 text-primary-700'
-                                                        : 'bg-amber-100 text-amber-700'
+                                                        ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20'
+                                                        : getClockInStatusForUi(r)?.status === 'Outstation'
+                                                            ? 'bg-primary-100 text-primary-700'
+                                                            : 'bg-amber-100 text-amber-700'
                                                     }`}
                                             >
                                                 {getClockInStatusForUi(r)?.status || 'Loading...'}
@@ -409,10 +410,10 @@ export default function ApprovalPage() {
                                                     className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${!getClockOutStatusForUi(r)
                                                         ? 'bg-surface-100 text-surface-500'
                                                         : getClockOutStatusForUi(r)?.status === 'Normal'
-                                                        ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20'
-                                                        : getClockOutStatusForUi(r)?.status === 'Outstation'
-                                                            ? 'bg-primary-100 text-primary-700'
-                                                            : 'bg-amber-100 text-amber-700'
+                                                            ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20'
+                                                            : getClockOutStatusForUi(r)?.status === 'Outstation'
+                                                                ? 'bg-primary-100 text-primary-700'
+                                                                : 'bg-amber-100 text-amber-700'
                                                         }`}
                                                 >
                                                     {getClockOutStatusForUi(r)?.status || 'Loading...'}
@@ -457,15 +458,16 @@ export default function ApprovalPage() {
                                     </div>
                                 )}
                                 {r.documentUrl && (
-                                    <a
-                                        href={`${import.meta.env.VITE_API_BASE_URL}${r.documentUrl}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="inline-flex items-center gap-1 mt-1 text-xs text-primary-600 hover:underline"
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setViewMediaUrl(toApiUrl(r.documentUrl));
+                                        }}
+                                        className="inline-flex items-center gap-1 mt-1 text-xs text-primary-600 hover:underline bg-transparent border-none p-0 cursor-pointer"
                                     >
                                         <FileText size={12} />
                                         View attachment
-                                    </a>
+                                    </button>
                                 )}
                             </div>
 
@@ -547,10 +549,10 @@ export default function ApprovalPage() {
                                             className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium w-fit ${!getClockInStatusForUi(detailRecord)
                                                 ? 'bg-surface-100 text-surface-500'
                                                 : getClockInStatusForUi(detailRecord)?.status === 'Normal'
-                                                ? 'bg-success-100 text-success-700'
-                                                : getClockInStatusForUi(detailRecord)?.status === 'Outstation'
-                                                    ? 'bg-primary-100 text-primary-700'
-                                                    : 'bg-amber-100 text-amber-700'
+                                                    ? 'bg-success-100 text-success-700'
+                                                    : getClockInStatusForUi(detailRecord)?.status === 'Outstation'
+                                                        ? 'bg-primary-100 text-primary-700'
+                                                        : 'bg-amber-100 text-amber-700'
                                                 }`}
                                         >
                                             {getClockInStatusForUi(detailRecord)?.status || 'Loading...'}
@@ -573,14 +575,13 @@ export default function ApprovalPage() {
                                 {detailRecord.clockInPhotoUrl && (
                                     <div className="col-span-2">
                                         <span className="text-surface-400">Selfie</span>
-                                        <a href={toApiUrl(detailRecord.clockInPhotoUrl)} target="_blank" rel="noopener noreferrer">
-                                            <img
-                                                src={toApiUrl(detailRecord.clockInPhotoUrl)}
-                                                alt="Clock-in selfie"
-                                                className="mt-1 rounded-lg border border-surface-200 max-h-48 object-cover cursor-pointer hover:opacity-80 transition-opacity"
-                                                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-                                            />
-                                        </a>
+                                        <button
+                                            onClick={() => setViewMediaUrl(toApiUrl(detailRecord.clockInPhotoUrl))}
+                                            className="text-primary-600 hover:underline flex items-center gap-1 mt-1 text-sm bg-transparent border-none p-0 cursor-pointer"
+                                        >
+                                            <Camera size={14} />
+                                            View Photo
+                                        </button>
                                     </div>
                                 )}
                             </div>
@@ -606,10 +607,10 @@ export default function ApprovalPage() {
                                                 className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium w-fit ${!getClockOutStatusForUi(detailRecord)
                                                     ? 'bg-surface-100 text-surface-500'
                                                     : getClockOutStatusForUi(detailRecord)?.status === 'Normal'
-                                                    ? 'bg-success-100 text-success-700'
-                                                    : getClockOutStatusForUi(detailRecord)?.status === 'Outstation'
-                                                        ? 'bg-primary-100 text-primary-700'
-                                                        : 'bg-amber-100 text-amber-700'
+                                                        ? 'bg-success-100 text-success-700'
+                                                        : getClockOutStatusForUi(detailRecord)?.status === 'Outstation'
+                                                            ? 'bg-primary-100 text-primary-700'
+                                                            : 'bg-amber-100 text-amber-700'
                                                     }`}
                                             >
                                                 {getClockOutStatusForUi(detailRecord)?.status || 'Loading...'}
@@ -633,14 +634,13 @@ export default function ApprovalPage() {
                                 {detailRecord.clockOutPhotoUrl && (
                                     <div className="col-span-2">
                                         <span className="text-surface-400">Selfie</span>
-                                        <a href={toApiUrl(detailRecord.clockOutPhotoUrl)} target="_blank" rel="noopener noreferrer">
-                                            <img
-                                                src={toApiUrl(detailRecord.clockOutPhotoUrl)}
-                                                alt="Clock-out selfie"
-                                                className="mt-1 rounded-lg border border-surface-200 max-h-48 object-cover cursor-pointer hover:opacity-80 transition-opacity"
-                                                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-                                            />
-                                        </a>
+                                        <button
+                                            onClick={() => setViewMediaUrl(toApiUrl(detailRecord.clockOutPhotoUrl))}
+                                            className="text-primary-600 hover:underline flex items-center gap-1 mt-1 text-sm bg-transparent border-none p-0 cursor-pointer"
+                                        >
+                                            <Camera size={14} />
+                                            View Photo
+                                        </button>
                                     </div>
                                 )}
                             </div>
@@ -665,27 +665,13 @@ export default function ApprovalPage() {
                             <div>
                                 <span className="text-surface-400 text-xs">Attachment</span>
                                 <div className="mt-1">
-                                    <img
-                                        src={toApiUrl(detailRecord.documentUrl)}
-                                        alt="Attached document"
-                                        className="rounded-lg max-h-48 object-contain border border-surface-200"
-                                        onError={(e) => {
-                                            const el = e.currentTarget;
-                                            el.style.display = 'none';
-                                            const link = el.nextElementSibling as HTMLElement;
-                                            if (link) link.style.display = 'inline-flex';
-                                        }}
-                                    />
-                                    <a
-                                        href={toApiUrl(detailRecord.documentUrl)}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-primary-600 hover:underline items-center gap-1"
-                                        style={{ display: 'none' }}
+                                    <button
+                                        onClick={() => setViewMediaUrl(toApiUrl(detailRecord.documentUrl))}
+                                        className="text-primary-600 hover:underline flex items-center gap-1 text-sm bg-transparent border-none p-0 cursor-pointer"
                                     >
-                                        <FileText size={14} className="inline mr-1" />
+                                        <FileText size={14} />
                                         View document
-                                    </a>
+                                    </button>
                                 </div>
                             </div>
                         )}
@@ -754,6 +740,53 @@ export default function ApprovalPage() {
                         </button>
                     </div>
                 </div>
+            </Modal>
+
+            {/* Media Viewer Modal */}
+            <Modal
+                open={!!viewMediaUrl}
+                onClose={() => setViewMediaUrl(null)}
+                title="View Attachment"
+                maxWidth="max-w-4xl"
+            >
+                {viewMediaUrl && (
+                    <div className="flex items-center justify-center p-2">
+                        {viewMediaUrl.toLowerCase().endsWith('.pdf') ? (
+                            <a
+                                href={viewMediaUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="btn-primary w-full max-w-sm"
+                            >
+                                <FileText size={18} className="mr-2" />
+                                Click to Open PDF in New Tab
+                            </a>
+                        ) : (
+                            <div className="relative">
+                                <img
+                                    src={viewMediaUrl}
+                                    alt="Attachment"
+                                    className="max-w-full max-h-[70vh] rounded-lg object-contain"
+                                    onError={(e) => {
+                                        const el = e.currentTarget as HTMLImageElement;
+                                        el.style.display = 'none';
+                                        if (el.nextElementSibling) {
+                                            (el.nextElementSibling as HTMLElement).style.display = 'flex';
+                                        }
+                                    }}
+                                />
+                                <div
+                                    className="flex flex-col items-center justify-center p-12 bg-surface-50 rounded-lg border border-surface-200 text-surface-500"
+                                    style={{ display: 'none' }}
+                                >
+                                    <X size={32} className="mb-2 text-surface-400" />
+                                    <p>Image not found</p>
+                                    <p className="text-xs mt-1">The file may have been deleted or is unavailable.</p>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
             </Modal>
 
             {/* Single Point Map Modal */}
