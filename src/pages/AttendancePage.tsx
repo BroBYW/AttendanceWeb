@@ -20,9 +20,13 @@ export default function AttendancePage() {
     const toApiUrl = (path?: string | null): string => {
         if (!path) return '';
         if (/^https?:\/\//i.test(path)) return path;
-        const base = API_BASE.replace(/\/+$/, '');
+        const base = API_BASE.replace(/\/+$/, '').replace(/\/api$/i, '');
         const normalizedPath = path.replace(/\\/g, '/');
-        const cleaned = `/${normalizedPath.replace(/^\/+/, '')}`;
+        const withoutLeadingSlash = normalizedPath.replace(/^\/+/, '');
+        const withUploadsPrefix = /^(selfies|documents|polygons)\//i.test(withoutLeadingSlash)
+            ? `uploads/${withoutLeadingSlash}`
+            : withoutLeadingSlash;
+        const cleaned = `/${withUploadsPrefix}`;
         return `${base}${cleaned}`;
     };
 
