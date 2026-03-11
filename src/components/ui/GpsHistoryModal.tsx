@@ -201,13 +201,14 @@ export default function GpsHistoryModal({ open, onClose, userId, userName }: Pro
     };
 
     const getStatusStyles = (status: string | null) => {
-        switch (status) {
+        const normalized = status?.trim().toUpperCase() ?? null;
+        switch (normalized) {
             case 'NORMAL':
-                return 'bg-success-100 text-success-700 border-success-200';
+                return 'bg-green-100 text-black border-green-200';
             case 'OUTSTATION':
-                return 'bg-warning-100 text-warning-700 border-warning-200';
+                return 'bg-blue-100 text-black border-blue-200';
             case 'OUTSIDE':
-                return 'bg-danger-100 text-danger-700 border-danger-200';
+                return 'bg-yellow-100 text-black border-yellow-200';
             default:
                 return 'bg-surface-100 text-surface-600 border-surface-200';
         }
@@ -217,7 +218,7 @@ export default function GpsHistoryModal({ open, onClose, userId, userName }: Pro
         switch (status) {
             case 'NORMAL': return '✓ Normal';
             case 'OUTSTATION': return '⚠ Outstation';
-            case 'OUTSIDE': return '✗ Outside';
+            case 'OUTSIDE': return '✗ Outside Working Area';
             default: return status || 'UNKNOWN';
         }
     };
@@ -345,8 +346,8 @@ export default function GpsHistoryModal({ open, onClose, userId, userName }: Pro
                                                                 </div>
                                                             )}
                                                             {log.remark && (
-                                                                <div className="text-[11px] text-primary-700 mt-2 font-medium italic bg-primary-50 px-1.5 py-0.5 rounded border border-primary-200 w-max max-w-[200px] truncate whitespace-normal leading-tight" title={log.remark}>
-                                                                    Note: {log.remark}
+                                                                <div className="text-sm text-black mt-2 font-medium bg-white px-3 py-2 rounded-md border border-surface-300 max-w-[320px] whitespace-normal break-words leading-relaxed shadow-sm" title={log.remark}>
+                                                                    Remark: {log.remark}
                                                                 </div>
                                                             )}
                                                         </td>
