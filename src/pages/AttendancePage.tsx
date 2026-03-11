@@ -21,7 +21,8 @@ export default function AttendancePage() {
         if (!path) return '';
         if (/^https?:\/\//i.test(path)) return path;
         const base = API_BASE.replace(/\/+$/, '');
-        const cleaned = `/${path.replace(/^\/+/, '')}`;
+        const normalizedPath = path.replace(/\\/g, '/');
+        const cleaned = `/${normalizedPath.replace(/^\/+/, '')}`;
         return `${base}${cleaned}`;
     };
 
