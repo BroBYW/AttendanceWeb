@@ -543,30 +543,29 @@ export default function ApprovalPage() {
                                     <span className="text-surface-400">Time</span>
                                     <p>{formatTime(detailRecord.clockInTime)}</p>
                                 </div>
-                                <div>
+                                <div className="row-span-2">
                                     <span className="text-surface-400">Type</span>
-                                    <div>{detailRecord.clockInType ? <StatusBadge status={detailRecord.clockInType} /> : '—'}</div>
-                                </div>
-                                <div>
-                                    <span className="text-surface-400">Location Status</span>
-                                    <div className="mt-1 flex flex-col">
-                                        <span
-                                            className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium w-fit ${!getClockInStatusForUi(detailRecord)
-                                                ? 'bg-surface-100 text-surface-500'
-                                                : getClockInStatusForUi(detailRecord)?.status === 'Normal'
-                                                    ? 'bg-success-100 text-success-700'
-                                                    : getClockInStatusForUi(detailRecord)?.status === 'Outstation'
-                                                        ? 'bg-primary-100 text-primary-700'
-                                                        : 'bg-amber-100 text-amber-700'
-                                                }`}
-                                        >
-                                            {getClockInStatusForUi(detailRecord)?.status || 'Loading...'}
-                                        </span>
-                                        {getClockInStatusForUi(detailRecord)?.areaName && (
-                                            <span className="text-[10px] text-surface-500 mt-0.5">
-                                                ({getClockInStatusForUi(detailRecord)?.areaName})
+                                    <div className="mt-0.5 flex flex-col items-start gap-1">
+                                        {detailRecord.clockInType ? <StatusBadge status={detailRecord.clockInType} /> : '—'}
+                                        <div className="mt-1 flex flex-col">
+                                            <span
+                                                className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium w-fit ${!getClockInStatusForUi(detailRecord)
+                                                    ? 'bg-surface-100 text-surface-500'
+                                                    : getClockInStatusForUi(detailRecord)?.status === 'Normal'
+                                                        ? 'bg-success-100 text-success-700'
+                                                        : getClockInStatusForUi(detailRecord)?.status === 'Outstation'
+                                                            ? 'bg-primary-100 text-primary-700'
+                                                            : 'bg-amber-100 text-amber-700'
+                                                    }`}
+                                            >
+                                                {getClockInStatusForUi(detailRecord)?.status || 'Loading...'}
                                             </span>
-                                        )}
+                                            {getClockInStatusForUi(detailRecord)?.areaName && (
+                                                <span className="text-[10px] text-surface-500 mt-0.5">
+                                                    ({getClockInStatusForUi(detailRecord)?.areaName})
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                                 <div>
@@ -600,34 +599,33 @@ export default function ApprovalPage() {
                                     <span className="text-surface-400">Time</span>
                                     <p>{formatTime(detailRecord.clockOutTime)}</p>
                                 </div>
-                                <div>
+                                <div className="row-span-2">
                                     <span className="text-surface-400">Type</span>
-                                    <div>{detailRecord.clockOutType ? <StatusBadge status={detailRecord.clockOutType} /> : '—'}</div>
-                                </div>
-                                {detailRecord.clockOutTime && (
-                                    <div>
-                                        <span className="text-surface-400">Location Status</span>
-                                        <div className="mt-1 flex flex-col">
-                                            <span
-                                                className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium w-fit ${!getClockOutStatusForUi(detailRecord)
-                                                    ? 'bg-surface-100 text-surface-500'
-                                                    : getClockOutStatusForUi(detailRecord)?.status === 'Normal'
-                                                        ? 'bg-success-100 text-success-700'
-                                                        : getClockOutStatusForUi(detailRecord)?.status === 'Outstation'
-                                                            ? 'bg-primary-100 text-primary-700'
-                                                            : 'bg-amber-100 text-amber-700'
-                                                    }`}
-                                            >
-                                                {getClockOutStatusForUi(detailRecord)?.status || 'Loading...'}
-                                            </span>
-                                            {getClockOutStatusForUi(detailRecord)?.areaName && (
-                                                <span className="text-[10px] text-surface-500 mt-0.5">
-                                                    ({getClockOutStatusForUi(detailRecord)?.areaName})
+                                    <div className="mt-0.5 flex flex-col items-start gap-1">
+                                        {detailRecord.clockOutType ? <StatusBadge status={detailRecord.clockOutType} /> : '—'}
+                                        {detailRecord.clockOutTime && (
+                                            <div className="mt-1 flex flex-col">
+                                                <span
+                                                    className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium w-fit ${!getClockOutStatusForUi(detailRecord)
+                                                        ? 'bg-surface-100 text-surface-500'
+                                                        : getClockOutStatusForUi(detailRecord)?.status === 'Normal'
+                                                            ? 'bg-success-100 text-success-700'
+                                                            : getClockOutStatusForUi(detailRecord)?.status === 'Outstation'
+                                                                ? 'bg-primary-100 text-primary-700'
+                                                                : 'bg-amber-100 text-amber-700'
+                                                        }`}
+                                                >
+                                                    {getClockOutStatusForUi(detailRecord)?.status || 'Loading...'}
                                                 </span>
-                                            )}
-                                        </div>
+                                                {getClockOutStatusForUi(detailRecord)?.areaName && (
+                                                    <span className="text-[10px] text-surface-500 mt-0.5">
+                                                        ({getClockOutStatusForUi(detailRecord)?.areaName})
+                                                    </span>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
-                                )}
+                                </div>
                                 <div>
                                     <span className="text-surface-400">GPS</span>
                                     <p className="font-mono text-xs">
