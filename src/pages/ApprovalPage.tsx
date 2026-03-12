@@ -542,30 +542,8 @@ export default function ApprovalPage() {
                                 <div>
                                     <span className="text-surface-400">Time</span>
                                     <p>{formatTime(detailRecord.clockInTime)}</p>
-                                </div>
-                                <div className="row-span-2">
-                                    <span className="text-surface-400">Type</span>
-                                    <div className="mt-0.5 flex flex-col items-start gap-1">
+                                    <div className="mt-1 flex items-center gap-2">
                                         {detailRecord.clockInType ? <StatusBadge status={detailRecord.clockInType} /> : '—'}
-                                        <div className="mt-1 flex flex-col">
-                                            <span
-                                                className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium w-fit ${!getClockInStatusForUi(detailRecord)
-                                                    ? 'bg-surface-100 text-surface-500'
-                                                    : getClockInStatusForUi(detailRecord)?.status === 'Normal'
-                                                        ? 'bg-success-100 text-success-700'
-                                                        : getClockInStatusForUi(detailRecord)?.status === 'Outstation'
-                                                            ? 'bg-primary-100 text-primary-700'
-                                                            : 'bg-amber-100 text-amber-700'
-                                                    }`}
-                                            >
-                                                {getClockInStatusForUi(detailRecord)?.status || 'Loading...'}
-                                            </span>
-                                            {getClockInStatusForUi(detailRecord)?.areaName && (
-                                                <span className="text-[10px] text-surface-500 mt-0.5">
-                                                    ({getClockInStatusForUi(detailRecord)?.areaName})
-                                                </span>
-                                            )}
-                                        </div>
                                     </div>
                                 </div>
                                 <div>
@@ -575,6 +553,25 @@ export default function ApprovalPage() {
                                             ? `${detailRecord.clockInLat}, ${detailRecord.clockInLng}`
                                             : '—'}
                                     </p>
+                                    <div className="mt-1 flex flex-col">
+                                        <span
+                                            className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium w-fit ${!getClockInStatusForUi(detailRecord)
+                                                ? 'bg-surface-100 text-surface-500'
+                                                : getClockInStatusForUi(detailRecord)?.status === 'Normal'
+                                                    ? 'bg-success-100 text-success-700'
+                                                    : getClockInStatusForUi(detailRecord)?.status === 'Outstation'
+                                                        ? 'bg-primary-100 text-primary-700'
+                                                        : 'bg-amber-100 text-amber-700'
+                                                }`}
+                                        >
+                                            {getClockInStatusForUi(detailRecord)?.status || 'Loading...'}
+                                        </span>
+                                        {getClockInStatusForUi(detailRecord)?.areaName && (
+                                            <span className="text-[10px] text-surface-500 mt-0.5">
+                                                ({getClockInStatusForUi(detailRecord)?.areaName})
+                                            </span>
+                                        )}
+                                    </div>
                                 </div>
                                 {detailRecord.clockInPhotoUrl && (
                                     <div className="col-span-2">
@@ -598,32 +595,8 @@ export default function ApprovalPage() {
                                 <div>
                                     <span className="text-surface-400">Time</span>
                                     <p>{formatTime(detailRecord.clockOutTime)}</p>
-                                </div>
-                                <div className="row-span-2">
-                                    <span className="text-surface-400">Type</span>
-                                    <div className="mt-0.5 flex flex-col items-start gap-1">
+                                    <div className="mt-1 flex items-center gap-2">
                                         {detailRecord.clockOutType ? <StatusBadge status={detailRecord.clockOutType} /> : '—'}
-                                        {detailRecord.clockOutTime && (
-                                            <div className="mt-1 flex flex-col">
-                                                <span
-                                                    className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium w-fit ${!getClockOutStatusForUi(detailRecord)
-                                                        ? 'bg-surface-100 text-surface-500'
-                                                        : getClockOutStatusForUi(detailRecord)?.status === 'Normal'
-                                                            ? 'bg-success-100 text-success-700'
-                                                            : getClockOutStatusForUi(detailRecord)?.status === 'Outstation'
-                                                                ? 'bg-primary-100 text-primary-700'
-                                                                : 'bg-amber-100 text-amber-700'
-                                                        }`}
-                                                >
-                                                    {getClockOutStatusForUi(detailRecord)?.status || 'Loading...'}
-                                                </span>
-                                                {getClockOutStatusForUi(detailRecord)?.areaName && (
-                                                    <span className="text-[10px] text-surface-500 mt-0.5">
-                                                        ({getClockOutStatusForUi(detailRecord)?.areaName})
-                                                    </span>
-                                                )}
-                                            </div>
-                                        )}
                                     </div>
                                 </div>
                                 <div>
@@ -633,6 +606,27 @@ export default function ApprovalPage() {
                                             ? `${detailRecord.clockOutLat}, ${detailRecord.clockOutLng}`
                                             : '—'}
                                     </p>
+                                    {detailRecord.clockOutTime && (
+                                        <div className="mt-1 flex flex-col">
+                                            <span
+                                                className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium w-fit ${!getClockOutStatusForUi(detailRecord)
+                                                    ? 'bg-surface-100 text-surface-500'
+                                                    : getClockOutStatusForUi(detailRecord)?.status === 'Normal'
+                                                        ? 'bg-success-100 text-success-700'
+                                                        : getClockOutStatusForUi(detailRecord)?.status === 'Outstation'
+                                                            ? 'bg-primary-100 text-primary-700'
+                                                            : 'bg-amber-100 text-amber-700'
+                                                    }`}
+                                            >
+                                                {getClockOutStatusForUi(detailRecord)?.status || 'Loading...'}
+                                            </span>
+                                            {getClockOutStatusForUi(detailRecord)?.areaName && (
+                                                <span className="text-[10px] text-surface-500 mt-0.5">
+                                                    ({getClockOutStatusForUi(detailRecord)?.areaName})
+                                                </span>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                                 {detailRecord.clockOutPhotoUrl && (
                                     <div className="col-span-2">

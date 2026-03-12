@@ -81,12 +81,14 @@ export interface AttendanceResponse {
     clockInLng: number | null;
     clockInType: ClockInType | null;
     clockInPhotoUrl: string | null;
+    clockInQueuedOffline: boolean | null;
     inGeofence: boolean | null;
     clockOutTime: string | null;
     clockOutLat: number | null;
     clockOutLng: number | null;
     clockOutType: ClockOutType | null;
     clockOutPhotoUrl: string | null;
+    clockOutQueuedOffline: boolean | null;
     clockOutInGeofence: boolean | null;
     workingMinutes: number | null;
     status: AttendanceStatus;
