@@ -22,13 +22,9 @@ export default function ApprovalPage() {
         const base = API_BASE.replace(/\/+$/, '').replace(/\/api$/i, '');
         const normalizedPath = path.replace(/\\/g, '/');
         const withoutLeadingSlash = normalizedPath.replace(/^\/+/, '');
-        const uploadsIndex = withoutLeadingSlash.indexOf('uploads/');
-        const pathFromUploads = uploadsIndex >= 0
-            ? withoutLeadingSlash.slice(uploadsIndex)
+        const withUploadsPrefix = /^(selfies|documents|polygons)\//i.test(withoutLeadingSlash)
+            ? `uploads/${withoutLeadingSlash}`
             : withoutLeadingSlash;
-        const withUploadsPrefix = /^(selfies|documents|polygons)\//i.test(pathFromUploads)
-            ? `uploads/${pathFromUploads}`
-            : pathFromUploads;
         const cleaned = `/${withUploadsPrefix}`;
         return `${base}${cleaned}`;
     };
@@ -775,6 +771,7 @@ export default function ApprovalPage() {
                                 <img
                                     src={viewMediaUrl}
                                     alt="Attachment"
+                                    referrerPolicy="no-referrer"
                                     className="max-w-full max-h-[70vh] rounded-lg object-contain"
                                     onError={(e) => {
                                         const el = e.currentTarget as HTMLImageElement;
