@@ -691,7 +691,7 @@ export default function AttendancePage() {
                                 </div>
                                 <div>
                                     <span className="text-surface-400">Type</span>
-                                    <div className="mt-0.5 flex flex-col gap-1">
+                                    <div className="mt-0.5 flex flex-col items-start gap-1">
                                         {detailRecord.clockInType ? <StatusBadge status={detailRecord.clockInType} /> : '—'}
                                         <div className="flex flex-col">
                                             <span
@@ -749,7 +749,7 @@ export default function AttendancePage() {
                                 </div>
                                 <div>
                                     <span className="text-surface-400">Type</span>
-                                    <div className="mt-0.5 flex flex-col gap-1">
+                                    <div className="mt-0.5 flex flex-col items-start gap-1">
                                         {detailRecord.clockOutType ? <StatusBadge status={detailRecord.clockOutType} /> : '—'}
                                         {detailRecord.clockOutTime && (
                                             <div className="flex flex-col">
