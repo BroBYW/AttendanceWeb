@@ -38,7 +38,7 @@ function findContainingBlock(
             if (p.division) parts.push(`D${p.division}`);
             if (p.blockno) parts.push(`B${p.blockno}`);
             if (p.taskno) parts.push(`T${p.taskno}`);
-            return parts.join(' · ') || 'Unknown';
+            return parts.join(' · ') || null;
         }
     }
     return null;
@@ -150,6 +150,31 @@ export default function GpsHistoryModal({ open, onClose, userId, userName }: Pro
         return rings;
     }, [officeAreas]);
 
+    const areaRings = useMemo(() => {
+        const rings: { areaName: string; ring: number[][] }[] = [];
+        for (const area of officeAreas) {
+            if (!area.geojsonData) continue;
+            try {
+                const parsed = (typeof area.geojsonData === 'string'
+                    ? JSON.parse(area.geojsonData)
+                    : area.geojsonData) as GeoJSON.FeatureCollection;
+
+                if (!parsed.features) continue;
+                for (const feature of parsed.features) {
+                    const geom = feature.geometry;
+                    if (geom.type === 'Polygon') {
+                        rings.push({ areaName: area.name, ring: (geom as any).coordinates[0] });
+                    } else if (geom.type === 'MultiPolygon') {
+                        for (const poly of (geom as any).coordinates) {
+                            rings.push({ areaName: area.name, ring: poly[0] });
+                        }
+                    }
+                }
+            } catch { /* skip */ }
+        }
+        return rings;
+    }, [officeAreas]);
+
     // Fetch and parse KML polygons
     const [kmlPolygons, setKmlPolygons] = useState<{ name: string; coordinates: [number, number][] }[]>([]);
     useEffect(() => {
@@ -198,6 +223,18 @@ export default function GpsHistoryModal({ open, onClose, userId, userName }: Pro
             ? findContainingKml(lat, lng, kmlPolygons)
             : null;
         return kmlInfo;
+    };
+
+    const getFallbackAreaName = (lat: number, lng: number): string | null => {
+        for (const area of areaRings) {
+            if (pointInPolygon(lat, lng, area.ring)) {
+                return area.areaName;
+            }
+        }
+        if (kmlPolygons.length > 0) {
+            return findContainingKml(lat, lng, kmlPolygons);
+        }
+        return null;
     };
 
     const getStatusStyles = (status: string | null) => {
@@ -311,6 +348,7 @@ export default function GpsHistoryModal({ open, onClose, userId, userName }: Pro
                                         <tbody className="divide-y divide-surface-100 bg-white">
                                             {logs.map((log) => {
                                                 const polyDetail = getPolygonDetail(log.latitude, log.longitude);
+                                                const areaDisplay = polyDetail || getFallbackAreaName(log.latitude, log.longitude);
                                                 const isSelected = selectedLogId === log.id;
                                                 return (
                                                     <tr
@@ -340,9 +378,9 @@ export default function GpsHistoryModal({ open, onClose, userId, userName }: Pro
                                                             <span className={`px-2 py-0.5 rounded text-xs font-semibold border ${getStatusStyles(log.areaStatus)}`}>
                                                                 {getStatusLabel(log.areaStatus)}
                                                             </span>
-                                                            {polyDetail && (
+                                                            {areaDisplay && (
                                                                 <div className="text-[10px] text-success-700 mt-1 font-medium">
-                                                                    ({polyDetail})
+                                                                    ({areaDisplay})
                                                                 </div>
                                                             )}
                                                             {log.remark && (
