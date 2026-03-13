@@ -320,7 +320,7 @@ export default function GpsHistoryModal({ open, onClose, userId, userName }: Pro
                                                     >
                                                         <td className="px-4 py-3">
                                                             <div className="font-semibold text-surface-900">
-                                                                {new Date(log.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                                                                {new Date(log.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}
                                                             </div>
                                                             <div className="text-xs text-surface-500 mt-0.5">
                                                                 {new Date(log.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
