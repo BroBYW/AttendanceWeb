@@ -6,7 +6,6 @@ import {
     Users,
     MapPin,
     ClipboardList,
-    ShieldCheck,
     LogOut,
     Menu,
     X,
@@ -20,7 +19,6 @@ const navItems = [
     { to: '/admin/users', label: 'Users', icon: Users },
     { to: '/admin/office-areas', label: 'Office Areas', icon: MapPin },
     { to: '/admin/attendance', label: 'Attendance', icon: ClipboardList },
-    { to: '/admin/approvals', label: 'Approvals', icon: ShieldCheck },
 ];
 
 export default function AdminLayout() {

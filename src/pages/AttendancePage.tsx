@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import { Search, Eye, Filter, X, Map, MessageCircle, FileText, Camera } from 'lucide-react';
+import { Search, Eye, Filter, X, Map, MessageCircle, FileText, Camera, Check } from 'lucide-react';
 import { attendanceService, type AttendanceFilters } from '../services/attendanceService';
 import { officeAreaService } from '../services/officeAreaService';
 import { userService } from '../services/userService';
@@ -8,6 +8,7 @@ import type { LocationStatusType } from '../components/ui/SinglePointMapModal';
 import StatusBadge from '../components/ui/StatusBadge';
 import Pagination from '../components/ui/Pagination';
 import Modal from '../components/ui/Modal';
+import ConfirmModal from '../components/ui/ConfirmModal';
 import GpsHistoryModal from '../components/ui/GpsHistoryModal';
 import SinglePointMapModal from '../components/ui/SinglePointMapModal';
 import { PageLoader } from '../components/ui/LoadingSpinner';
@@ -33,6 +34,7 @@ export default function AttendancePage() {
     const PAGE_SIZE = 20;
     const [records, setRecords] = useState<AttendanceResponse[]>([]);
     const [officeAreas, setOfficeAreas] = useState<OfficeAreaResponse[]>([]);
+    const [officeAreaNamesById, setOfficeAreaNamesById] = useState<Record<number, string>>({});
     const [locationStatusLoading, setLocationStatusLoading] = useState(true);
     // Map of userId -> assignedOfficeAreaIds for user-aware location status
     const [userAssignments, setUserAssignments] = useState<Record<number, number[]>>({});
@@ -40,6 +42,10 @@ export default function AttendancePage() {
     const [page, setPage] = useState(0);
     const [totalPages, setTotalPages] = useState(0);
     const [detailRecord, setDetailRecord] = useState<AttendanceResponse | null>(null);
+    const [approveTarget, setApproveTarget] = useState<AttendanceResponse | null>(null);
+    const [rejectTarget, setRejectTarget] = useState<AttendanceResponse | null>(null);
+    const [processing, setProcessing] = useState(false);
+    const [rejectComment, setRejectComment] = useState('');
     const [gpsHistoryUser, setGpsHistoryUser] = useState<{ id: number, name: string } | null>(null);
     const [showFilters, setShowFilters] = useState(false);
     const [mapModalData, setMapModalData] = useState<{
@@ -95,6 +101,11 @@ export default function AttendancePage() {
             setLocationStatusLoading(true);
             const res = await officeAreaService.getAll();
             if (res.success) {
+                const areaNameMap = res.data.reduce<Record<number, string>>((acc, area) => {
+                    acc[area.id] = area.name;
+                    return acc;
+                }, {});
+                setOfficeAreaNamesById(areaNameMap);
                 const activeAreas = res.data.filter(area => area.status === 'ACTIVE');
                 setOfficeAreas(activeAreas);
                 // Background-load geojson data for polygon checks
@@ -122,11 +133,13 @@ export default function AttendancePage() {
         }
     };
 
-    const loadRecords = async () => {
+    const loadRecords = async (statusOverride?: AttendanceStatus | '', pageOverride?: number) => {
         setLoading(true);
         try {
+            const activeStatus = statusOverride ?? filterStatus;
+            const activePage = pageOverride ?? page;
             const filters: AttendanceFilters = {};
-            if (filterStatus) filters.status = filterStatus;
+            if (activeStatus) filters.status = activeStatus;
             if (filterStartDate) filters.startDate = filterStartDate;
             if (filterEndDate) filters.endDate = filterEndDate;
             if (filterEmployeeId.trim()) {
@@ -181,19 +194,19 @@ export default function AttendancePage() {
                 });
 
                 const computedTotalPages = Math.ceil(behaviorFiltered.length / PAGE_SIZE);
-                const safePage = computedTotalPages > 0 ? Math.min(page, computedTotalPages - 1) : 0;
+                const safePage = computedTotalPages > 0 ? Math.min(activePage, computedTotalPages - 1) : 0;
                 const startIndex = safePage * PAGE_SIZE;
                 const pageContent = behaviorFiltered.slice(startIndex, startIndex + PAGE_SIZE);
 
                 setRecords(pageContent);
                 setTotalPages(computedTotalPages);
-                if (safePage !== page) {
+                if (safePage !== activePage) {
                     setPage(safePage);
                 }
                 return;
             }
 
-            const res = await attendanceService.getAll({ ...filters, page, size: PAGE_SIZE });
+            const res = await attendanceService.getAll({ ...filters, page: activePage, size: PAGE_SIZE });
             if (res.success) {
                 setRecords(res.data.content);
                 setTotalPages(res.data.totalPages);
@@ -202,6 +215,51 @@ export default function AttendancePage() {
             toast.error('Failed to load attendance records');
         } finally {
             setLoading(false);
+        }
+    };
+
+    const statusTabs = [
+        { value: 'PENDING', label: 'Pending' },
+        { value: 'AUTO_APPROVED', label: 'Auto-Approved' },
+        { value: 'APPROVED', label: 'Approved' },
+        { value: 'REJECTED', label: 'Rejected' },
+        { value: '', label: 'All' },
+    ] as const;
+
+    const handleApprove = async () => {
+        if (!approveTarget) return;
+        setProcessing(true);
+        try {
+            await attendanceService.approve(approveTarget.id);
+            toast.success('Attendance approved');
+            setApproveTarget(null);
+            if (detailRecord?.id === approveTarget.id) {
+                setDetailRecord(null);
+            }
+            loadRecords();
+        } catch {
+            toast.error('Failed to approve');
+        } finally {
+            setProcessing(false);
+        }
+    };
+
+    const handleReject = async () => {
+        if (!rejectTarget) return;
+        setProcessing(true);
+        try {
+            await attendanceService.reject(rejectTarget.id, rejectComment || undefined);
+            toast.success('Attendance rejected');
+            if (detailRecord?.id === rejectTarget.id) {
+                setDetailRecord(null);
+            }
+            setRejectTarget(null);
+            setRejectComment('');
+            loadRecords();
+        } catch {
+            toast.error('Failed to reject');
+        } finally {
+            setProcessing(false);
         }
     };
 
@@ -374,6 +432,15 @@ export default function AttendancePage() {
         return getClockOutLocationStatus(r);
     };
 
+    const getAssignedOfficeAreasText = (record: AttendanceResponse) => {
+        const assignedIds = userAssignments[record.userId] || [];
+        if (assignedIds.length > 0) {
+            const names = assignedIds.map((id) => officeAreaNamesById[id] || `Area #${id}`);
+            return names.join(', ');
+        }
+        return record.officeAreaName || '—';
+    };
+
     const filteredRecords = records;
 
     if (loading && records.length === 0) return <PageLoader />;
@@ -383,7 +450,7 @@ export default function AttendancePage() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                 <div>
                     <h1 className="text-2xl font-bold text-surface-900">Attendance Records</h1>
-                    <p className="text-sm text-surface-500 mt-1">View all employee attendance</p>
+                    <p className="text-sm text-surface-500 mt-1">View, review, and approve attendance records</p>
                 </div>
                 <button
                     onClick={() => setShowFilters(!showFilters)}
@@ -392,6 +459,26 @@ export default function AttendancePage() {
                     <Filter size={18} />
                     Filters
                 </button>
+            </div>
+
+            <div className="flex flex-wrap gap-2 mb-4">
+                {statusTabs.map(tab => (
+                    <button
+                        key={tab.value || 'ALL'}
+                        onClick={() => {
+                            const nextStatus = tab.value as AttendanceStatus | '';
+                            setFilterStatus(nextStatus);
+                            setPage(0);
+                            loadRecords(nextStatus, 0);
+                        }}
+                        className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${filterStatus === tab.value
+                            ? 'bg-primary-600 text-white shadow-sm'
+                            : 'bg-surface-100 text-surface-600 hover:bg-surface-200'
+                            }`}
+                    >
+                        {tab.label}
+                    </button>
+                ))}
             </div>
 
             {/* Filters panel */}
@@ -407,6 +494,7 @@ export default function AttendancePage() {
                             >
                                 <option value="">All</option>
                                 <option value="PENDING">Pending</option>
+                                <option value="AUTO_APPROVED">Auto-Approved</option>
                                 <option value="APPROVED">Approved</option>
                                 <option value="REJECTED">Rejected</option>
                             </select>
@@ -476,6 +564,9 @@ export default function AttendancePage() {
                             <th>Employee</th>
                             <th>Clock In</th>
                             <th>Clock Out</th>
+                            <th>Clock-In Photo</th>
+                            <th>Late Reason</th>
+                            <th>Late Attachment</th>
                             <th>Duration</th>
                             <th>Status</th>
                             <th className="text-right">Actions</th>
@@ -484,7 +575,7 @@ export default function AttendancePage() {
                     <tbody>
                         {filteredRecords.length === 0 ? (
                             <tr>
-                                <td colSpan={8} className="text-center py-8 text-surface-400">
+                                <td colSpan={10} className="text-center py-8 text-surface-400">
                                     No attendance records found
                                 </td>
                             </tr>
@@ -580,32 +671,85 @@ export default function AttendancePage() {
                                             )}
                                         </td>
                                         <td>
+                                            {r.clockInPhotoUrl ? (
+                                                <button
+                                                    onClick={() => setViewMediaUrl(toApiUrl(r.clockInPhotoUrl))}
+                                                    className="text-primary-600 hover:underline flex items-center gap-1 text-xs bg-transparent border-none p-0 cursor-pointer"
+                                                >
+                                                    <Camera size={12} />
+                                                    View Photo
+                                                </button>
+                                            ) : (
+                                                '—'
+                                            )}
+                                        </td>
+                                        <td className="text-xs text-surface-700 max-w-[220px]">
+                                            {r.reason ? (
+                                                <span className="block max-h-10 overflow-hidden text-ellipsis" title={r.reason}>{r.reason}</span>
+                                            ) : (
+                                                '—'
+                                            )}
+                                        </td>
+                                        <td>
+                                            {r.documentUrl ? (
+                                                <button
+                                                    onClick={() => setViewMediaUrl(toApiUrl(r.documentUrl))}
+                                                    className="text-primary-600 hover:underline flex items-center gap-1 text-xs bg-transparent border-none p-0 cursor-pointer"
+                                                >
+                                                    <FileText size={12} />
+                                                    View Attachment
+                                                </button>
+                                            ) : (
+                                                '—'
+                                            )}
+                                        </td>
+                                        <td>
                                             {r.workingMinutes != null
                                                 ? `${Math.floor(r.workingMinutes / 60)}h ${r.workingMinutes % 60}m`
                                                 : '—'}
                                         </td>
                                         <td><StatusBadge status={r.status} /></td>
                                         <td className="text-right flex justify-end gap-1">
+                                            {r.status === 'PENDING' && (
+                                                <>
+                                                    <button
+                                                        onClick={() => setApproveTarget(r)}
+                                                        className="btn-success btn-sm p-1.5"
+                                                        title="Approve"
+                                                    >
+                                                        <Check size={16} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setRejectTarget(r)}
+                                                        className="btn-danger btn-sm p-1.5"
+                                                        title="Reject"
+                                                    >
+                                                        <X size={16} />
+                                                    </button>
+                                                </>
+                                            )}
                                             <button
                                                 onClick={() => setGpsHistoryUser({ id: r.userId, name: r.userName })}
-                                                className="btn-ghost btn-sm text-primary-600 p-1.5 hover:bg-primary-50"
+                                                className="btn-ghost btn-sm text-primary-600 p-1.5 hover:bg-primary-50 flex flex-col items-center leading-tight"
                                                 title="View GPS History"
                                             >
                                                 <Map size={16} />
+                                                <span className="text-[10px] mt-0.5">GPS</span>
                                             </button>
                                             <button
                                                 onClick={() => setDetailRecord(r)}
-                                                className="btn-ghost btn-sm p-1.5"
+                                                className="btn-ghost btn-sm p-1.5 flex flex-col items-center leading-tight"
                                                 title="View Details"
                                             >
                                                 <Eye size={16} />
+                                                <span className="text-[10px] mt-0.5">Detail</span>
                                             </button>
                                         </td>
                                     </tr>
                                     {/* Rejection note inline row */}
                                     {r.status === 'REJECTED' && r.notes && (
                                         <tr className="bg-red-50 border-none">
-                                            <td colSpan={7} className="py-2 px-4">
+                                            <td colSpan={10} className="py-2 px-4">
                                                 <div className="flex items-start gap-2 text-xs">
                                                     <MessageCircle size={13} className="text-red-400 mt-0.5 shrink-0" />
                                                     <div>
@@ -667,7 +811,7 @@ export default function AttendancePage() {
                             </div>
                             <div>
                                 <span className="text-surface-400">Office Area</span>
-                                <p>{detailRecord.officeAreaName || '—'}</p>
+                                <p>{getAssignedOfficeAreasText(detailRecord)}</p>
                             </div>
                             <div>
                                 <span className="text-surface-400">Duration</span>
@@ -776,20 +920,6 @@ export default function AttendancePage() {
                                         </div>
                                     )}
                                 </div>
-                                <div className="col-span-2">
-                                    <span className="text-surface-400">Photo</span>
-                                    {detailRecord.clockOutPhotoUrl ? (
-                                        <button
-                                            onClick={() => setViewMediaUrl(toApiUrl(detailRecord.clockOutPhotoUrl))}
-                                            className="text-primary-600 hover:underline flex items-center gap-1 mt-1 text-sm bg-transparent border-none p-0 cursor-pointer"
-                                        >
-                                            <Camera size={14} />
-                                            View Photo
-                                        </button>
-                                    ) : (
-                                        <p>—</p>
-                                    )}
-                                </div>
                             </div>
                         </div>
 
@@ -848,6 +978,19 @@ export default function AttendancePage() {
                                         <span className="text-red-700 font-semibold text-xs">Rejection Note</span>
                                     </div>
                                     <p className="text-red-700 text-sm">{detailRecord.notes}</p>
+                                </div>
+                            </>
+                        )}
+                        {detailRecord.status === 'PENDING' && (
+                            <>
+                                <hr className="border-surface-100" />
+                                <div className="flex gap-3 justify-end">
+                                    <button onClick={() => { setDetailRecord(null); setApproveTarget(detailRecord); }} className="btn-success">
+                                        <Check size={16} /> Approve
+                                    </button>
+                                    <button onClick={() => { setDetailRecord(null); setRejectTarget(detailRecord); }} className="btn-danger">
+                                        <X size={16} /> Reject
+                                    </button>
                                 </div>
                             </>
                         )}
@@ -923,6 +1066,56 @@ export default function AttendancePage() {
                         )}
                     </div>
                 )}
+            </Modal>
+
+            <ConfirmModal
+                open={!!approveTarget}
+                onClose={() => setApproveTarget(null)}
+                onConfirm={handleApprove}
+                title="Approve Attendance"
+                message={`Approve ${approveTarget?.userName}'s ${approveTarget?.clockInType?.toLowerCase()} attendance for ${approveTarget ? formatDate(approveTarget.attendanceDate) : ''}?`}
+                confirmText="Approve"
+                variant="success"
+                loading={processing}
+            />
+
+            <Modal
+                open={!!rejectTarget}
+                onClose={() => { setRejectTarget(null); setRejectComment(''); }}
+                title="Reject Attendance"
+                maxWidth="max-w-md"
+            >
+                <div className="space-y-4">
+                    <p className="text-sm text-surface-600">
+                        Reject <strong>{rejectTarget?.userName}</strong>'s {rejectTarget?.clockInType?.toLowerCase()} attendance for {rejectTarget ? formatDate(rejectTarget.attendanceDate) : ''}?
+                    </p>
+                    <div>
+                        <label className="label">Comment (optional)</label>
+                        <textarea
+                            className="input w-full"
+                            rows={3}
+                            placeholder="Reason for rejection..."
+                            value={rejectComment}
+                            onChange={(e) => setRejectComment(e.target.value)}
+                        />
+                    </div>
+                    <div className="flex gap-3 justify-end pt-2">
+                        <button
+                            onClick={() => { setRejectTarget(null); setRejectComment(''); }}
+                            className="btn-secondary"
+                            disabled={processing}
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            onClick={handleReject}
+                            className="btn-danger"
+                            disabled={processing}
+                        >
+                            {processing ? 'Processing...' : 'Reject'}
+                        </button>
+                    </div>
+                </div>
             </Modal>
         </div>
     );

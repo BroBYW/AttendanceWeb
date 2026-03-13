@@ -9,7 +9,6 @@ import DashboardPage from './pages/DashboardPage';
 import UsersPage from './pages/UsersPage';
 import OfficeAreasPage from './pages/OfficeAreasPage';
 import AttendancePage from './pages/AttendancePage';
-import ApprovalPage from './pages/ApprovalPage';
 import UnauthorizedPage from './pages/UnauthorizedPage';
 
 export default function App() {
@@ -45,7 +44,7 @@ export default function App() {
             <Route path="users" element={<RoleRoute allowed={['ADMIN']}><UsersPage /></RoleRoute>} />
             <Route path="office-areas" element={<RoleRoute allowed={['ADMIN']}><OfficeAreasPage /></RoleRoute>} />
             <Route path="attendance" element={<RoleRoute allowed={['ADMIN']}><AttendancePage /></RoleRoute>} />
-            <Route path="approvals" element={<RoleRoute allowed={['ADMIN']}><ApprovalPage /></RoleRoute>} />
+            <Route path="approvals" element={<Navigate to="/admin/attendance" replace />} />
           </Route>
 
           {/* Catch-all */}
